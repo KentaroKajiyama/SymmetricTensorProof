@@ -1408,6 +1408,10 @@ lemma inv_step_some
 
 def μ_exec {m n K} [Field K] (st : GEExecState m n K) : Nat := n - st.colPtr
 
+@[simp] lemma μ_exec_erase {m n K} [Field K] (st : GEStateP m n K) :
+  μ_exec (erase st) = μ st := by
+  simp [μ, μ_exec, erase]
+
 
 def geStepP {m n K} [Field K] (st : GEStateP m n K) : GEStateP m n K :=
   match findPivot st with
@@ -1425,12 +1429,12 @@ def geStepP {m n K} [Field K] (st : GEStateP m n K) : GEStateP m n K :=
       }
   | some i0 =>
       let R₁ := rSwap st.R st.rowCount i0.val
-      let a  := (matOf R₁) ⟨st.rowCount, by sorry⟩ ⟨st.colPtr, by sorry⟩
+      let a  := (matOf R₁) ⟨st.rowCount, _⟩ ⟨st.colPtr, _⟩
       let R₂ := rScale R₁ st.rowCount (a⁻¹)
       let R₃ := R₂ -- 後でrAxpyで他行消去する
       let new_r   := st.rowCount + 1
       let new_c   := st.colPtr + 1
-      let new_piv := extendPivot st.pivot ⟨st.colPtr, by sorry⟩
+      let new_piv := extendPivot st.pivot ⟨st.colPtr, _⟩
       have inv' : Inv R₃.A st.M0 R₃ new_r new_c new_piv :=
         -- TODO: findPivot を埋めたらここも埋める
         inv_step_some (by admit)
@@ -1438,11 +1442,15 @@ def geStepP {m n K} [Field K] (st : GEStateP m n K) : GEStateP m n K :=
 
 def stepKernel {m n K} [Field K] (st : GEExecState m n K)
   : GEExecState m n K :=
-  -- ここで findPivot / rSwap / rScale / rAxpy を使って
-  -- 「c を必ず +1、pivot 見つかったら r も +1」までを実装
-  -- （あなたの geStepP の計算部分だけを抽出）
-  sorry
+  if h : st.rowCount < m ∧ st.colPtr < n then
+    -- ★ ここに「1ステップ進める処理」（pivot 探索＋rSwap＋rScale＋rAxpy）を書く
+    --     まだ実装してなくて OK。後で書き換えられるように placeholder にしておいてもいい。
+    st  -- TODO: 実際のアルゴリズムに差し替え
+  else
+    -- すでに doneExecP st （= ¬(rowCount< m ∧ colPtr< n)） のときはこちら
+    st
 
+-- TODO: 1 ステップの関数を実装する。証明と実行用を分けて後でつなぐ。
 
 lemma stepP_erases_to_kernel
   {m n K} [Field K] (stP : GEStateP m n K) :
@@ -1452,21 +1460,36 @@ by
   -- findPivot の分岐、rSwap/rScale/rAxpy の順を潰す
   sorry
 
+-- doneExecP なら stepKernel は恒等変換
+lemma stepKernel_doneExecP_id
+  {m n K} [Field K] {st : GEExecState m n K}
+  (h : doneExecP st) :
+  stepKernel st = st := by
+  -- doneExecP の展開
+  unfold doneExecP at h
+  -- stepKernel の展開
+  unfold stepKernel
+  -- h : ¬ (st.rowCount < m ∧ st.colPtr < n)
+  -- なので if 条件は偽、`else st` ブランチになる
+  simp [h]
 
 -- 1. 1ステップで M0 は書き換えない（レコード更新が M0 に触れない）
 lemma geStepP_preserves_M0 {m n K} [Field K] (s : GEStateP m n K) :
   (geStepP s).M0 = s.M0 := rfl
 
+-- 2. doneP でなければ colPtr < n
 lemma colPtr_lt_n_of_not_done
   {m n K} [Field K] {s : GEStateP m n K}
   (h : ¬ doneP s) : s.colPtr < n := by
-  -- ← あなたの doneP の定義に合わせて証明する
-  -- 例： by
-  --   rcases (doneP_cases s) with hdone | hdone
-  --   · exact False.elim (h hdone)
-  --   · … など
-  admit
+  classical
+  by_contra hcn
+  have hdone : doneP s := by
+    dsimp [doneP]
+    intro h'
+    exact hcn h'.2
+  exact h hdone
 
+-- 3. 1ステップで μ が厳密に減少する
 lemma geStepP_decreases_of_lt {m n K} [Field K]
   (s : GEStateP m n K) (hcn : s.colPtr < n) :
   μ (geStepP s) < μ s := by
@@ -1500,16 +1523,49 @@ def geRunExec {m n K} [Field K] (fuel : Nat) (st : GEExecState m n K) : GEExecSt
   -- fuel 回 stepKernel を回す単純ループ（while相当）
   Nat.iterate stepKernel fuel st
 
+
+-- fuel が十分大きければ結果は変わらない、を示す補題
 lemma reach_final_with_enough_fuel
   {m n K} [Field K]
   (st0 : GEExecState m n K)
   (fuel fuel' : Nat)
   (hge : fuel ≥ fuel')
   (hstop : doneExecP (geRunExec fuel' st0)) :
-  geRunExec fuel st0 = geRunExec fuel' st0 :=
-by admit
+  geRunExec fuel st0 = geRunExec fuel' st0 := by
+  unfold geRunExec at *
+  obtain ⟨d, rfl⟩ := Nat.exists_eq_add_of_le hge
+    -- fuel' 回後の状態を s' とおく
+  set s' := Nat.iterate stepKernel fuel' st0 with hs'
+  have hstop' : doneExecP s' := by
+    -- hstop : doneExecP (geRunExec fuel' st0) から
+    simpa [geRunExec, hs'] using hstop
+  have h_id : stepKernel s' = s' :=
+    stepKernel_doneExecP_id hstop'
+  -- s' からスタートして d 回回しても s' のまま、という補題
+  have hconst : Nat.iterate stepKernel d s' = s' := by
+    induction d with
+    | zero =>
+        -- 0 回なら当然 s'
+        simp
+    | succ d ih =>
+        -- (d+1) 回 = 1 回回してから d 回
+        -- 1 回回したら h_id で s' に戻るので、
+        -- その後 d 回回しても ih で s'
+        simp [Nat.iterate, h_id, ih]
+  calc
+    Nat.iterate stepKernel (fuel' + d) st0
+      = Nat.iterate stepKernel d s' := by
+        simp [s']
+        conv =>
+          rhs
+          rw [<-Function.iterate_add_apply, Nat.add_comm]
+      _ = s' := hconst
+      _ = geRunExec fuel' st0 := by
+        simp [geRunExec, hs']
 
 
+
+-- 証明付きで実行した結果を消去しても、証明なしで実行した結果と一致する、を示す補題
 lemma run_erases_to_exec
   {m n K} [Field K] (st : GEStateP m n K) :
   ∃ fuel ≤ μ_exec (erase st),
@@ -1517,36 +1573,80 @@ lemma run_erases_to_exec
 by
   -- WF再帰の帰納法＋ stepP_erases_to_kernel を使って、
   -- 各ステップで erase が一致すること（bisim）を示す。
-  sorry
-
-theorem geRunExec_correct
-  {m n K} [Field K]
-  (M0 : Matrix (Fin m) (Fin n) K)
-  (fuel : Nat) (hfuel : fuel ≥ n) :
-  let R0  : Rectified m n K := rectifiedOfMatrix M0
-  let h0  : matOf R0 = M0 := matOf_rectifiedOfMatrix (K:=K) M0
-  let _hInv0 : Inv R0.A M0 R0 0 0 (Fin.elim0) := inv_init R0.A M0 R0 h0
-  let st0E : GEExecState m n K :=
-    { M0 := M0, R := R0, rowCount := 0, colPtr := 0, piv := (Fin.elim0) }
-  let outE := geRunExec fuel st0E
-  ∃ ref_meta : REFMeta m n,
-      IsREF (matOf outE.R) ref_meta ∧
-      ref_meta.r = outE.rowCount ∧
-      Matrix.rank (matOf outE.R) = outE.rowCount ∧
-      Matrix.rank (matOf outE.R) = Matrix.rank M0 :=
-by
-  intro R0 h0 _hInv0 st0E outE
-  -- 以下は前回スケルトンと同様。
-  -- 1) run_erases_to_exec で WF⇔Exec の合致
-  -- 2) I5_fac と rank_mul_preserved_by_left_unit で rank(M_final)=rank(M0)
-  -- 3) IsREF → rank = pivot
-  -- 4) pivot 段数 = outE.rowCount を合致させて締める
-  sorry
+  have hmain :
+    ∀ k (st : GEStateP m n K),
+      μ st ≤ k →
+      ∃ fuel ≤ μ st,
+        erase (geRunWF_P st) = geRunExec fuel (erase st) := by
+        refine Nat.rec ?base ?step
+        · -- base: k = 0 のとき
+          intro st hk
+          have hdone : doneP st := by
+            by_contra hnd
+            have hμ_pos : 0 < μ st := by
+              have hcn : st.colPtr < n := colPtr_lt_n_of_not_done (s:=st) hnd
+              simp [μ]
+              exact hcn
+            exact Nat.not_le_of_lt hμ_pos hk
+          have : geRunWF_P st = st := by
+            simp [geRunWF_P, hdone]
+          refine ⟨0, ?fuel_le, ?eq⟩
+          · simp
+          · conv =>
+              lhs
+              rw [this]
+            simp [geRunExec]
+        · -- step: k → k+1 のとき
+          intro k ih st hμ
+          by_cases hdone : doneP st
+          · have : geRunWF_P st = st := by
+              simp [geRunWF_P, hdone]
+            refine ⟨0, ?_, ?_⟩
+            · exact Nat.zero_le _
+            · conv =>
+                lhs
+                rw [this]
+              simp [geRunExec]
+          · -- まだ done でないので、1 ステップ進める
+            have hcn : st.colPtr < n := colPtr_lt_n_of_not_done (s:=st) hdone
+            have hμ_decr : μ (geStepP st) < μ st := geStepP_decreases_of_lt (s:=st) hcn
+            -- μ (geStepP st) ≤ k を作る
+            have hμ_st' : μ (geStepP st) ≤ k := by
+              have : μ (geStepP st) ≤ k := by
+                have : μ (geStepP st) < k.succ := Nat.lt_of_lt_of_le hμ_decr hμ
+                exact Nat.le_of_lt_succ this
+              exact this
+            have hIH := ih (geStepP st) ?hμ
+            rcases hIH with ⟨fuel', hfuel'_le, heq⟩
+            refine ⟨fuel' + 1, ?_, ?_⟩
+            · -- fuel' + 1 ≤ μ st
+              have h1 : fuel' < μ st := by
+                exact
+                  Nat.lt_of_le_of_lt hfuel'_le hμ_decr
+              exact Nat.succ_le.mpr h1
+            · -- erase (geRunWF_P st) = geRunExec (fuel' + 1) (erase st)
+              have hWF :
+                geRunWF_P st = geRunWF_P (geStepP st) := by
+                  rw [geRunWF_P]
+                  simp [hdone]
+              calc
+                erase (geRunWF_P st)
+                  = erase (geRunWF_P (geStepP st)) := by rw [hWF]
+                _ = geRunExec fuel' (erase (geStepP st)) := heq
+                _ = geRunExec fuel' (stepKernel (erase st)) := by
+                  rw [stepP_erases_to_kernel]
+                _ = geRunExec (fuel' + 1) (erase st) := by
+                  simp [geRunExec, Nat.iterate]
+            · -- μ (geStepP st) ≤ k を示す。
+              exact hμ_st'
+  -- 最後に hmain を st と μ st で適用
+  obtain ⟨fuel, hfuel_le, heq⟩ := hmain (μ st) st (rfl.le)
+  exact ⟨fuel, hfuel_le, heq⟩
 
 
 
 /- Inv の I5 を使えば 元の行列の rank と最後の行列の rank が等しいことが geRun を使った場合でも示せるはず（geRun は Inv を保持するので）。-/
-/-- REF の rank はピボット本数に等しい -/
+/- REF の rank はピボット本数に等しい -/
 /- 1.ピボット列が一次独立（各ピボット列は標準基底ベクトルそのもの）
   2.任意の列はピボット列の線形結合で書ける（ピボット行の成分を係数にする）
   これによって列空間の次元 = ピボット列の数  = ref.r であることを示す。-/
@@ -1715,56 +1815,89 @@ lemma rank_of_REF_eq_pivot_count
   -- 列空間＝toLinearMap.range は「全列の span」と一致
   -- 片側：range ⊆ span(pivots)
   -- 行列 A : (m×n) が与えられているとして
-
+  --  それを線形写像 A_lin : K^n → K^m に変換する
   let A_lin : (Fin n → K) →ₗ[K] (Fin m → K) := Matrix.mulVecLin A
 
+  -- A_lin の像（列空間）は pivot 列の span に入る
   have range_le :
     LinearMap.range A_lin
       ≤ Submodule.span K (Set.range (fun i : Fin ref.r => A.col (ref.pivot i))) := by
     -- range は列ベクトルの像の張る空間。基底 e_j を通した像が col j。
     -- よって各 col j が上の span に入る ⇒ range 全体が入る。
-    refine LinearMap.range_le_iff_comap.2 ?_
-    intro v
-    -- v が基底 e_j なら …
-    -- 実務上は `by intro j; simpa using all_cols_in_span j` で OK
-    intro j; simpa using all_cols_in_span j
+    intro y hy
+    rcases hy with ⟨x, rfl⟩
+    -- 元のベクトル空間は K^n
+    -- Pi.single に型注釈をつけないといけない。
+    have hx : x = ∑ j : Fin n, x j • (Pi.single j (1 : K) : Fin n → K) := by
+      funext i
+      simp [Pi.smul_apply, Finset.sum_apply, Pi.single_apply]
+
+    have hx' : A_lin x = ∑ j : Fin n, x j • A_lin (Pi.single j (1 : K) : Fin n → K) := by
+      conv =>
+        lhs
+        rw [hx]
+      simp [map_sum]
+
+
+    have hcol : ∀ j : Fin n,
+      A_lin (Pi.single j (1 : K) : Fin n → K) = A.col j := by
+      intro j
+      funext i'
+      simp [A_lin]
+
+    have hA_lin_x : A_lin x = ∑ j : Fin n, x j • A.col j := by
+      rw [hx']
+      congr
+      funext j
+      rw [hcol j]
+
+    have :
+    ∀ j : Fin n, x j • A.col j
+      ∈ Submodule.span K (Set.range (fun i : Fin ref.r => A.col (ref.pivot i))) := by
+      intro j
+      exact
+      Submodule.smul_mem
+        (Submodule.span K (Set.range (fun i : Fin ref.r => A.col (ref.pivot i))))
+        (x j)
+        (all_cols_in_span j)
+    simp [hA_lin_x]
+    refine Submodule.sum_mem
+      (p := Submodule.span K (Set.range (fun i : Fin ref.r => A.col (ref.pivot i))))
+      (t := (Finset.univ : Finset (Fin n)))
+      ?_
+    intro j _hj
+    exact this j
+
 
   -- 逆側：pivot 列は range に入る（もちろん列だから）
+  -- つまり span(pivots) ⊆ range
   have span_le_range :
     Submodule.span K (Set.range (fun i : Fin ref.r => A.col (ref.pivot i)))
-      ≤ (Matrix.toLinearMap A).range := by
+      ≤  LinearMap.range A_lin := by
+    have hcol : ∀ j : Fin n,
+      A_lin (Pi.single j (1 : K) : Fin n → K) = A.col j := by
+      intro j
+      funext i'
+      simp [A_lin]
     refine Submodule.span_le.2 ?_
-    intro v hv
-    rcases hv with ⟨i, rfl⟩
-    -- `A.col (ref.p i)` は e_(ref.p i) を A に通した像
-    refine ⟨Pi.single (ref.p i) 1, ?_⟩
-    -- `toLinearMap` で `Pi.single` は「その列」を返す
-    -- `Matrix.toLinearMap_apply` or `Matrix.mulVec` 経由の `col` 同一視を使ってください
-    -- 多くの環境で `by funext; simp [Matrix.toLinearMap_apply, Matrix.col_apply]` で通ります
-    funext i'
-    -- ここは
-    --   (toLinearMap A) (Pi.single (ref.p i) 1)) i'
-    -- = Σ_j A i' j * (Pi.single (ref.p i) 1) j
-    -- = A i' (ref.p i)
-    -- = (A.col (ref.p i)) i'
-    -- の計算です。
-    simp [Matrix.toLinearMap_apply, Matrix.col_apply]
+    intro y hy
+    rcases hy with ⟨i, rfl⟩
+    refine ⟨Pi.single (ref.pivot i) (1 : K), ?_⟩
+    rw [hcol (ref.pivot i)]
+
 
   -- 次元（=rank）を挟み撃ち：range と span が相互包含だから同次元
   have eq_spaces :
-    (Matrix.toLinearMap A).range
-      = Submodule.span K (Set.range (fun i : Fin ref.r => A.col (ref.p i))) :=
+    LinearMap.range A_lin
+      = Submodule.span K (Set.range (fun i : Fin ref.r => A.col (ref.pivot i))) :=
     le_antisymm range_le span_le_range
 
   -- 左辺の finrank が rank、右辺は「LI な ref.r 本の張る空間」だから次元 ref.r
   -- `linInd_pivots` から `finrank_span_eq_card` 系の補題を使う
-  have : finrank K ((Matrix.toLinearMap A).range) = ref.r := by
-    -- 右辺空間の finrank を計算
-    -- `LinearIndependent.finrank_span` の類を使います
-    --   finrank(span(range v)) = card(ι) if v は LI
-    simpa [eq_spaces] using
-      (linInd_pivots.finrank_span (f := fun i : Fin ref.r => A.col (ref.p i)))
-
+  -- A_lin の像の次元 = pivot 列の本数
+  have : Module.finrank K (LinearMap.range A_lin) = ref.r := by
+    rw [eq_spaces]
+    simp [finrank_span_eq_card linInd_pivots]
   -- rank の定義で仕上げ
   simpa [Matrix.rank] using this
 
