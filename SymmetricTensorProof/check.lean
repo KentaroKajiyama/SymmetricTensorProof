@@ -3749,7 +3749,6 @@ lemma matOf_rSwap_eq_P_mul
           rhs
           simp [h_perm_other]
 
-
 lemma inv_after_rSwap
   {m n K} [Field K] {st : GEStateP m n K} {i0 : Fin m}
   (hrow : st.rowCount ≤ i0)
@@ -4100,26 +4099,402 @@ lemma inv_after_rSwap
         _        = (P * E) * st.M0 := by
                       simp [Matrix.mul_assoc]
 
+/- rScale で行 k を a 倍したとき、その行の成分は a 倍される -/
+lemma matOf_rScale_row_scaled
+  {m n K} [Field K]
+  (R : Rectified m n K) {k : Nat} (hk : k < m)
+  (a : K) (c : Fin n) :
+  matOf (rScale R k a) ⟨k, hk⟩ c
+    = a * matOf R ⟨k, hk⟩ c := by
+  -- rowScale/ rScale / toMat の定義を展開して証明
+  -- （rowAxpy のときと同じ系統の array-level のゴリ押し）
+  have hAsize : R.A.size = m := by
+    -- Rectified の定義から
+    simp [R.rowSize]
 
+  have hk': k < R.A.size := by
+    simp [hAsize, hk]
+
+  simp [rScale, hk', matOf, toMat, rowScale]
+
+/- rScale は行 k 以外は変えない -/
+lemma matOf_rScale_row_other
+  {m n K} [Field K]
+  (R : Rectified m n K) {k : Nat} (hk : k < m)
+  (a : K) {i' : Fin m} (hne : (i' : Nat) ≠ k) (c : Fin n) :
+  matOf (rScale R k a) i' c =
+    matOf R i' c := by
+  -- rowScale / rScale / toMat の定義と `hne` を使って
+  -- 「set した index と違う indexの成分は変わらない」を証明
+  have hAsize : R.A.size = m := by
+    -- Rectified の定義から
+    simp [R.rowSize]
+  have hi'_lt_m : (i' : Nat) < m := by
+    simp [i'.is_lt]
+  have hk': k < R.A.size := by
+    simp [hAsize, hk]
+  simp [rScale, hk', matOf, toMat,
+  rowScale, Array.setIfInBounds, Array.getElem_set, hne.symm]
+
+/- rScale は「対角に a を持つ elementary scaling 行列」を左からかけたものと同じ -/
+lemma matOf_rScale_eq_D_mul
+  {m n K} [Field K]
+  (R : Rectified m n K) {k : Nat} (hk : k < m)
+  (a : K) (ha : a ≠ 0) :
+  ∃ D : Matrix (Fin m) (Fin m) K,
+    IsUnit D ∧
+    matOf (rScale R k a) = Matrix.mulᵣ D (matOf R) := by
+  -- D：対角は 1, except (k,k) = a のような行列
+  -- det D = a ≠ 0 なので IsUnit D
+  -- あとは「行列の k 行だけを a 倍」が mulᵣ D になることを ext で証明
+  let D : Matrix (Fin m) (Fin m) K :=
+    Matrix.diagonal (fun i => if (i : Nat) = k then a else 1)
+  have hD_unit : IsUnit D := by
+    -- det D = a なので a ≠ 0 より単元
+    have h_det :
+      Matrix.det D = a := by
+      -- D の定義から det を計算
+      simp [D]
+      rw [Finset.prod_eq_single ⟨k, hk⟩]
+      · simp
+      · -- ケース2: i ≠ k のとき (1 になることの確認)
+        intro b _ h_neq
+        -- b ≠ ⟨k, hk⟩ ならば、b.val ≠ k なので if文は else 1 に落ちる
+        rw [if_neg]
+        intro h_eq
+        apply h_neq
+        apply Fin.eq_of_val_eq h_eq
+      · -- ケース3: ⟨k, hk⟩ が範囲外の場合 (Fin m なのでありえない)
+        simp
+    have : IsUnit D.det := by
+      simp [h_det, ha]
+    exact (Matrix.isUnit_iff_isUnit_det D).mpr this
+  -- matOf (rScale R k a) = mulᵣ D (matOf R) の証明
+  refine ⟨D, hD_unit, ?_⟩
+  ext i j
+  -- i = k のときと i ≠ k のときで場合分け
+  by_cases h_i_k : (i : Nat) = k
+  · ------------------------------------------------------------------
+    -- case 1: i = k → 行 k だけが a 倍される
+    ------------------------------------------------------------------
+    -- i を Fin k に同一視
+    have hk' : k < m := hk
+    have hi_eq : i = ⟨k, hk'⟩ := by
+      apply Fin.ext
+      simp [h_i_k]
+
+    subst hi_eq
+
+    -- 左辺：rScale で行 k が a 倍された
+    have hL :
+      matOf (rScale R k a) ⟨k, hk'⟩ j =
+        a * matOf R ⟨k, hk'⟩ j := by
+      -- 「スケールされた行の成分は a 倍」という rScale 用の補題
+      -- （rSwap の matOf_rSwap_row_left に対応するやつ）
+      -- 例えばこんな形で用意しておく：
+      -- lemma matOf_rScale_row_scaled
+      --   (R : Rectified m n K) {row} (hrow : row < m) (k : K) (c : Fin n) :
+      --   matOf (rScale R row k) ⟨row, hrow⟩ c
+      --     = k * matOf R ⟨row, hrow⟩ c
+      simpa using
+        matOf_rScale_row_scaled R hk' a j
+
+    -- 右辺：対角行列 D で左から掛けると，行 k は「係数 a 倍」になる
+    have hR :
+      Matrix.mulᵣ D (matOf R) ⟨k, hk'⟩ j =
+        a * matOf R ⟨k, hk'⟩ j := by
+      -- diagonal_mul :
+      -- (Matrix.diagonal v ⬝ M) i j = v i * M i j
+      -- mulᵣ は単に左からの積と同じなので simp で落ちる
+      simp [Matrix.mulᵣ_eq, D, Matrix.diagonal_mul]
+
+    -- まとめて両辺を一致させる
+    calc
+      matOf (rScale R k a) ⟨k, hk'⟩ j
+          = a * matOf R ⟨k, hk'⟩ j := hL
+      _   = Matrix.mulᵣ D (matOf R) ⟨k, hk'⟩ j := hR.symm
+
+  · ------------------------------------------------------------------
+    -- case 2: i ≠ k → 行 i はそのまま
+    ------------------------------------------------------------------
+    have hk' : k < m := hk
+
+    -- 左辺：行 i は rScale でも変わらない
+    have hL :
+      matOf (rScale R k a) i j =
+        matOf R i j := by
+      -- 「スケール対象以外の行はそのまま」という補題
+      -- 例えば：
+      -- lemma matOf_rScale_row_other
+      --   (R : Rectified m n K) {row} (hrow : row < m) (k : K)
+      --   {i : Fin m} (hne : (i : ℕ) ≠ row) (c : Fin n) :
+      --   matOf (rScale R row k) i c
+      --     = matOf R i c
+      simpa using
+        matOf_rScale_row_other R hk' a (hne := h_i_k) j
+
+    -- 右辺：対角行列 D で左から掛けると，
+    -- 行 i の係数は v i = if ↑i = k then a else 1 だが，
+    -- 仮定 i ≠ k より 1 倍になる
+    have hR :
+      Matrix.mulᵣ D (matOf R) i j =
+        matOf R i j := by
+      have hcoeff :
+        (if (i : Nat) = k then a else (1 : K)) = 1 := by
+        simp [h_i_k]  -- if_neg
+      -- diagonal_mul を使って，row スケールの形に落とす
+      simp [Matrix.mulᵣ_eq, D, Matrix.diagonal_mul, hcoeff]
+
+    calc
+      matOf (rScale R k a) i j
+          = matOf R i j := hL
+      _   = Matrix.mulᵣ D (matOf R) i j := hR.symm
 
 lemma inv_after_rScale
-  {m n K} [Field K] {R : Rectified m n K} {M0}
+  {m n K} [Field K] {R : Rectified m n K} {M0 : Matrix (Fin m) (Fin n) K}
   {r0 c0 : Nat} {p0 : Fin r0 → Fin n}
   (hInv : Inv M0 R r0 c0 p0)
-  {k : Nat} {a : K} (ha : a ≠ 0)
-  (hk : k < m) :
-  Inv M0 (rScale R k a) r0 c0 p0 := by
+  {a : K} (ha : a ≠ 0) (hrow_lt_m : r0 < m) :
+  Inv M0 (rScale R r0 a) r0 c0 p0 := by
   classical
-  -- 「k 行目だけ a 倍した行基本変形」に対応する行列 E_k(a) を左からかけた
-  -- とみなして I5_fac を更新し、I2_unit などが壊れないことを確認する。
-  -- 今回は k = st.rowCount なので、
-  --   - pivot 行であること
-  --   - pivot 列以外の構造
-  -- を careful に見る必要がありますが、
-  -- 実際には「元の pivot 行のその列の値 = a_before」として
-  --   a := a_before⁻¹
-  -- を取っているので「掛けた後は 1」になります。
-  admit
+  set R' := rScale R r0 a with hR'
+  let hrows := hInv.I0_rows
+  have hkA : r0 < R.A.size := by
+    -- R.A.size = m なので
+    simpa [hrows] using hrow_lt_m
+  have h_bound := hInv.I1_bound
+
+  refine
+    { I0_rows := ?_
+    , I0_rect := ?_
+    , I1_bound := ?_
+    , I1_mono  := ?_
+    , I1_in    := ?_
+    , I2_unit  := ?_
+    , I3_left0 := ?_
+    , I4_tail0 := ?_
+    , I5_fac   := ?_
+    }
+
+  · ------------------------------------------------------------------
+    -- I0_rows : 行数は変わらない
+    ------------------------------------------------------------------
+    simpa [R'] using (rScale R r0 a).rowSize
+
+  · ------------------------------------------------------------------
+    -- I0_rect : Rect 性も保たれる
+    ------------------------------------------------------------------
+    simpa [R'] using (rScale R r0 a).rect
+
+  · ------------------------------------------------------------------
+    -- I1_bound : r0 ≤ m, c0 ≤ n はそのまま
+    ------------------------------------------------------------------
+    exact hInv.I1_bound
+
+  · ------------------------------------------------------------------
+    -- I1_mono : pivot 列の StrictMono はそのまま
+    ------------------------------------------------------------------
+    exact hInv.I1_mono
+
+  · ------------------------------------------------------------------
+    -- I1_in : pivot 列 < c0 もそのまま
+    ------------------------------------------------------------------
+    exact hInv.I1_in
+
+  · ------------------------------------------------------------------
+    -- I2_unit : 既存の pivot 列は縦に単位ベクトルのまま
+    ------------------------------------------------------------------
+    intro i
+    rcases hInv.I2_unit i with ⟨h_one_old, h_zero_old⟩
+
+    -- pivot 行の index を Fin m に持ち上げる
+    let rowOld : Fin m := Fin.castLE h_bound.1 i
+    have h_rowOld_lt_r0 : (rowOld : ℕ) < r0 := by
+      -- castLE の値は i.val
+      simp [rowOld]  -- i.val < r0
+
+    -- rowOld はスケールする行 r0 とは異なる
+    have h_rowOld_ne_k : (rowOld : ℕ) ≠ r0 := by
+      exact ne_of_lt h_rowOld_lt_r0
+
+    -- pivot 行は rScale で変わらない
+    have h_row_pres :
+      ∀ j : Fin n,
+        matOf R' rowOld j = matOf R rowOld j := by
+      intro j
+      have hk' : r0 < m := hrow_lt_m
+      simpa [R'] using
+        matOf_rScale_row_other (R := R) hk' a h_rowOld_ne_k j
+
+    refine ⟨?h_one, ?h_zero⟩
+
+    · -- pivot 成分 = 1 のまま
+      have h_eq := h_row_pres (p0 i)
+      have h_one_old' :
+        matOf R rowOld (p0 i) = 1 := by
+        simpa [rowOld] using h_one_old
+      -- h_eq : matOf R' rowOld (p0 i) = matOf R rowOld (p0 i)
+      -- なので 右辺を 1 に書き換える
+      have : matOf R' rowOld (p0 i) = 1 := by
+        simpa [h_one_old'] using h_eq
+      -- 目標の行 index は定義的に rowOld
+      simpa [rowOld] using this
+
+    · -- 他の行は 0 のまま
+      intro i' hi'_ne
+      by_cases h_i'_k : (i' : ℕ) = r0
+      · --------------------------------------------------------------
+        -- case 1: i' = r0 → スケールされた行
+        --------------------------------------------------------------
+        have hk' : r0 < m := hrow_lt_m
+        -- スケール後の pivot 列成分 = a * 元の成分
+        have h_scaled :
+          matOf R' ⟨r0, hk'⟩ (p0 i) =
+            a * matOf R ⟨r0, hk'⟩ (p0 i) := by
+          simpa [R'] using
+            matOf_rScale_row_scaled (R := R) (k := r0) hk' a (p0 i)
+
+        -- row r0 は pivot 行 rowOld とは別なので、元の R では pivot 列成分は 0
+        have h_zero_old_k :
+          matOf R ⟨r0, hk'⟩ (p0 i) = 0 := by
+          have h_ne_rowOld :
+            (⟨r0, hk'⟩ : Fin m) ≠ rowOld := by
+            intro hEq
+            have hv := congrArg (fun (x : Fin m) => (x : ℕ)) hEq
+            have : (rowOld : ℕ) < (rowOld : ℕ) := by
+              -- rowOld < r0 と hv から矛盾
+              have hlt : (rowOld : ℕ) < r0 := h_rowOld_lt_r0
+              -- hv : rowOld = r0
+              -- これを代入すると rowOld < rowOld の形になる
+              have : (r0 : ℕ) = (rowOld : ℕ) := by
+                simpa using hv
+              simp [this] at hlt
+            exact (Nat.lt_irrefl _ this)
+          -- I2_unit の「他の行は 0」
+          simpa using h_zero_old ⟨r0, hk'⟩ h_ne_rowOld
+
+        have : i' = ⟨r0, hk'⟩ := by
+          apply Fin.ext
+          simp [h_i'_k]
+
+        simp [this, h_scaled, h_zero_old_k]
+
+      · --------------------------------------------------------------
+        -- case 2: i' ≠ r0 → 行そのものは変わらない
+        --------------------------------------------------------------
+        have hk' : r0 < m := hrow_lt_m
+        have h_pres :
+          matOf R' i' (p0 i) =
+            matOf R i' (p0 i) := by
+          simpa [R'] using
+            matOf_rScale_row_other (R := R) hk' a h_i'_k (p0 i)
+
+        -- 元の R では「pivot 行以外」は 0
+        have h_zero_old' :
+          matOf R i' (p0 i) = 0 :=
+          h_zero_old i' hi'_ne
+
+        simp [h_pres, h_zero_old']
+
+  · ------------------------------------------------------------------
+    -- I3_left0 : pivot 行の左側は 0 のまま
+    ------------------------------------------------------------------
+    intro i j hj_lt
+    -- pivot 行
+    let rowOld : Fin m := Fin.castLE h_bound.1 i
+    have h_rowOld_lt_r0 : (rowOld : ℕ) < r0 := by
+      simp [rowOld]
+    have h_rowOld_ne_k : (rowOld : ℕ) ≠ r0 := by
+      exact ne_of_lt h_rowOld_lt_r0
+
+    -- 元の R で左側 0
+    have hz_old :
+      matOf R rowOld j = 0 := by
+      have := hInv.I3_left0 i j hj_lt
+      simpa [rowOld] using this
+
+    -- rScale で pivot 行は変わらない
+    have hk' : r0 < m := hrow_lt_m
+    have h_row_pres :
+      matOf R' rowOld j = matOf R rowOld j := by
+      simpa [R'] using
+        matOf_rScale_row_other (R := R) hk' a h_rowOld_ne_k j
+
+    -- castLE 版と rowOld は defeq
+    calc
+      matOf R' (Fin.castLE h_bound.1 i) j
+          = matOf R' rowOld j := by rfl
+      _   = matOf R rowOld j := h_row_pres
+      _   = 0 := hz_old
+
+  · ------------------------------------------------------------------
+    -- I4_tail0 : まだ pivot でない列 j < c0 では、行 r0 以降は 0 のまま
+    ------------------------------------------------------------------
+    intro j hj_lt h_noPivot i' hi_ge
+    have hk' : r0 < m := hrow_lt_m
+
+    -- 元の R では tail 部分は全部 0
+    have hz_old_general :
+      matOf R i' j = 0 :=
+      hInv.I4_tail0 j hj_lt h_noPivot i' hi_ge
+
+    by_cases h_i'_k : (i' : ℕ) = r0
+    · --------------------------------------------------------------
+      -- case 1: i' = r0 → スケールされた行
+      --------------------------------------------------------------
+      -- R での r0 行の j 成分も 0
+      have hz_old_k :
+        matOf R ⟨r0, hk'⟩ j = 0 := by
+        -- hi_ge : r0 ≤ (⟨r0, hk'⟩ : Fin m).val は refl
+        have hi_ge' : (r0 : ℕ) ≤ (⟨r0, hk'⟩ : Fin m) := by
+          simp
+        simpa using
+          hInv.I4_tail0 j hj_lt h_noPivot ⟨r0, hk'⟩ hi_ge'
+
+      -- スケールされた行の j 成分 = a * 0
+      have h_scaled :
+        matOf R' ⟨r0, hk'⟩ j =
+          a * matOf R ⟨r0, hk'⟩ j := by
+        simpa [R'] using
+          matOf_rScale_row_scaled (R := R) (k := r0) hk' a j
+      have : i' = ⟨r0, hk'⟩ := by
+        apply Fin.ext
+        simp [h_i'_k]
+      simp [this, h_scaled, hz_old_k]
+
+    · --------------------------------------------------------------
+      -- case 2: i' ≠ r0 → 行はそのまま
+      --------------------------------------------------------------
+      have h_pres :
+        matOf R' i' j = matOf R i' j := by
+        simpa [R'] using
+          matOf_rScale_row_other (R := R) hk' a h_i'_k j
+
+      simp [h_pres, hz_old_general]
+
+  · ------------------------------------------------------------------
+    -- I5_fac : factorization を更新（スケーリング行列を掛けたとみなす）
+    ------------------------------------------------------------------
+    rcases hInv.I5_fac with ⟨E, hE_unit, hE_mul⟩
+    -- rScale に対応する対角行列 D
+    rcases matOf_rScale_eq_D_mul R hrow_lt_m a ha with
+      ⟨D, hD_unit, hD_mul⟩
+
+    -- mulᵣ D (matOf R) = D * matOf R （mulᵣ_eq を使う）
+    have hD_mul' :
+      matOf R' = D * matOf R := by
+      simpa [R', Matrix.mulᵣ_eq] using hD_mul
+
+    refine ⟨D * E, ?_, ?_⟩
+    · -- 単元の積は単元
+      exact IsUnit.mul hD_unit hE_unit
+    · -- matOf R' = (D * E) * M0
+      calc
+        matOf R'
+            = D * matOf R := hD_mul'
+        _   = D * (E * M0) := by simp [hE_mul]
+        _   = (D * E) * M0 := by
+                  simp [Matrix.mul_assoc]
 
 lemma extendPivot_strictMono_state
   {m n K} [Field K] {st : GEStateP m n K}
@@ -4136,14 +4511,48 @@ lemma extendPivot_strictMono_state
     simpa using h
   exact extendPivot_strictMono hp hc
 
-
 lemma extendPivot_in
   {m n K} [Field K] {st : GEStateP m n K}
   (hcol : st.colPtr < n) :
   ∀ i, extendPivot st.pivot ⟨st.colPtr, hcol⟩ i < st.colPtr + 1 := by
   -- i < rowCount の場合はもとの pivot < colPtr
   -- 新しいインデックス rowCount では colPtr < colPtr + 1
-  admit
+  intro i
+  by_cases h_i_rowCount : i = ⟨st.rowCount, by simp⟩
+  · ----------------------------------------------------------------
+    -- case 1: i = rowCount
+    ----------------------------------------------------------------
+    have : extendPivot st.pivot ⟨st.colPtr, hcol⟩ i
+          = ⟨st.colPtr, hcol⟩ := by
+      simp [h_i_rowCount]
+      unfold extendPivot
+      simp
+    conv =>
+      lhs
+      rw [this]
+      simp
+    simp
+  · ----------------------------------------------------------------
+    -- case 2: i ≠ rowCount
+    ----------------------------------------------------------------
+    unfold extendPivot
+    have h_i_lt : (i : ℕ) < st.rowCount := by
+      -- i ≠ rowCount なので i.val < rowCount
+      apply Nat.lt_of_le_of_ne
+      · -- i ≤ st.rowCount の証明
+        exact Nat.le_of_lt_succ i.is_lt
+      · -- i.val ≠ rowCount の証明
+        intro h_eq
+        exact h_i_rowCount (by
+          apply Fin.ext
+          simp [h_eq]
+        )
+    simp [h_i_lt]
+    have : (st.pivot ⟨i.val, h_i_lt⟩).val < (⟨st.colPtr, hcol⟩ : Fin n).val := by
+      -- st.inv.I1_in を使う
+      have h := st.inv.I1_in ⟨i.val, h_i_lt⟩
+      simpa using h
+    exact Nat.lt_succ_of_lt this
 
 
 lemma newPivotRow_left_zero
@@ -4232,7 +4641,6 @@ lemma newPivotRow_left_zero
     simpa [rowFin] using h_tail
 
 
-
 /- rAxpy は pivot 行そのものは変えない -/
 lemma matOf_rAxpy_pivot_row
   {m n K} [Field K]
@@ -4261,6 +4669,78 @@ lemma matOf_rAxpy_pivot_row
 
   simp [Array.setIfInBounds, hiA,
   toMat, Array.getElem_set, hrowNe.symm]
+
+/- `rAxpy R dst src a` は src 行を変えない -/
+lemma rAxpy_src_row_unchanged
+  {m n K} [Field K]
+  (R : Rectified m n K)
+  {src dst : Nat} (hsrc : src < R.A.size) (hdst : dst < R.A.size)
+  (hne : dst ≠ src) (a : K) :
+  (rAxpy R dst src a).A[src]'(by
+    have hsize :=
+      preserve_rowSize_rowAxpy
+      R.A R.rowSize dst src a
+      (
+        by
+          have hsize : R.A.size = m := R.rowSize
+          simpa [hsize] using hdst
+      )
+      (
+        by
+          have hsize : R.A.size = m := R.rowSize
+          simpa [hsize] using hsrc
+      ) R.rect
+    have : (rAxpy R dst src a).A.size = (rowAxpy dst src a R.A n R.rect).size := by
+      simp [rAxpy, hsrc, hdst]
+    have : src < (rAxpy R dst src a).A.size := by
+      rw [this, hsize]
+      conv => rhs; rw [R.rowSize.symm]
+      exact hsrc
+    exact this
+  ) = R.A[src] := by
+  -- rAxpy の実装が「dst 行だけ書き換える」ので，
+  -- `dst = src` の場合だけ注意して、そのケースを排除するか
+  -- 定義を展開して `if` をさばいていく感じ。
+  --
+  -- ここはあなたの rAxpy の定義に合わせて
+  --   simp [rAxpy, Array.set!, hdst, hsrc, ...]
+  -- でゴリゴリ書けるはず。
+  unfold rAxpy
+  simp [hdst, hsrc, rowAxpy, Array.setIfInBounds, Array.getElem_set]
+  intro h_eq
+  exact False.elim (hne h_eq)
+
+lemma rAxpy_other_row_unchanged
+  {m n K} [Field K]
+  (R : Rectified m n K)
+  {src dst j : Nat} (hsrc : src < R.A.size) (hdst : dst < R.A.size)
+  (hj : j < R.A.size) (hjne : j ≠ dst) (a : K) :
+  (rAxpy R dst src a).A[j]'(
+    by
+      have hsize :=
+        preserve_rowSize_rowAxpy
+        R.A R.rowSize dst src a
+        (
+          by
+            have hsize : R.A.size = m := R.rowSize
+            simpa [hsize] using hdst
+        )
+        (
+          by
+            have hsize : R.A.size = m := R.rowSize
+            simp [hsize] at hsrc
+            exact hsrc
+        ) R.rect
+      have : (rAxpy R dst src a).A.size = (rowAxpy dst src a R.A n R.rect).size := by
+        simp [rAxpy, hsrc, hdst]
+      have : j < (rAxpy R dst src a).A.size := by
+        rw [this, hsize]
+        conv => rhs; rw [R.rowSize.symm]
+        exact hj
+      exact this
+  ) = R.A[j]'hj:= by
+  unfold rAxpy
+  simp [hdst, hsrc, rowAxpy, Array.setIfInBounds, Array.getElem_set, hjne.symm]
 
 /- TODO: matOf, toMat を展開して中身が等しいことを示せた稀有な例 -/
 /- pivot 行の `col'` 成分が 0 なら、rAxpy は `col'` 列全体を変えない -/
@@ -4486,24 +4966,971 @@ lemma clearPivotCol_preserve_col
   simpa [clearPivotCol] using h0
 
 
+/- pivot 行 `row` を使って列 `col` を掃き出すループは，
+    何ステップ進めても pivot 行 `row` の行ベクトルを変えない（Array 版） -/
+lemma clearPivotCol_loop_row_unchanged_simple
+  {m n K} [Field K]
+  {row col : Nat}
+  (hrow : row < m) (hcol : col < n) :
+  ∀ (R : Rectified m n K) (i : Nat) (hiA : i ≤ m),
+    (clearPivotCol_loop R row col hcol i).A[row]'(
+      by
+        have hsize :=
+          preserve_rowSize_clearPivotCol_loop
+            row col hcol i R
+        have : row < (clearPivotCol_loop R row col hcol i).A.size := by
+          rw [hsize]
+          simp [hrow]
+          exact hiA
+        exact this
+    ) = R.A[row]'(
+      by
+        have hsize : R.A.size = m := R.rowSize
+        simpa [hsize] using hrow
+    ) := by
+  -- k := m - i を measure に取って強い帰納法
+  have main :
+    ∀ (k i : Nat) (R : Rectified m n K) (hmi : i + k = m),
+      m - i = k →
+      (clearPivotCol_loop R row col hcol i).A[row]'(
+        by
+          have hsize :=
+            preserve_rowSize_clearPivotCol_loop
+              row col hcol i R
+          have : row < (clearPivotCol_loop R row col hcol i).A.size := by
+            rw [hsize]
+            simp [hrow]
+            exact Nat.le.intro hmi
+          exact this
+      ) = R.A[row]'(
+        by
+          have hsize : R.A.size = m := R.rowSize
+          simpa [hsize] using hrow
+      ) := by
+    intro k
+    induction k with
+    | zero =>
+      intro i R hmi hmi_eq
+      -- m - i = 0 ⇒ i ≥ m
+      have hi_ge : m ≤ i := Nat.le_of_sub_eq_zero (by simp [hmi_eq])
+      have hi_lt : ¬ i < m := not_lt_of_ge hi_ge
+      -- i ≥ m のとき clearPivotCol_loop は R を返す
+      have hloop : clearPivotCol_loop R row col hcol i = R := by
+        simp [clearPivotCol_loop, hi_lt]
+      simp [hloop]
+    | succ k ih =>
+      intro i R hmi hmi_eq
+      -- m - i = k.succ ⇒ i < m
+      have hi_lt : i < m := by
+        by_contra hge
+        have hge' : m ≤ i := Nat.le_of_not_gt hge
+        have hzero : m - i = 0 := Nat.sub_eq_zero_of_le hge'
+        have : (0 : Nat) = Nat.succ k := by simp [hzero] at hmi_eq
+        exact Nat.succ_ne_zero k this.symm
 
+      -- m - (i+1) = k
+      have hmi_succ : m - (i+1) = k := by
+        -- `Nat.sub_succ` を使うか，`simp` で落とす
+        have := congrArg Nat.pred hmi_eq
+        -- 実装は環境に合わせて調整してね
+        -- だいたい `simp [Nat.sub, hi_lt]` で通るはず
+        simp at this
+        exact this
+      -- `i = row` かどうかで場合分け
+      by_cases hrow_eq : i = row
+      · -- pivot 行のインデックスのときは何もしないで i+1 に進む branch
+        have : i + 1 + k = m := by
+          -- i + 1 + k = (i + k) + 1 = m
+          rw [Nat.add_assoc, Nat.add_comm 1 k, hmi]
+        have hIH := ih (i+1) R this hmi_succ
+        -- `clearPivotCol_loop` の定義から
+        --   clearPivotCol_loop R … i = clearPivotCol_loop R … (i+1)
+        have hloop :
+          clearPivotCol_loop R row col hcol i =
+          clearPivotCol_loop R row col hcol (i+1) := by
+          have hiA : i ≤ m := Nat.le.intro hmi
+          -- i < m なので `if hi : i < m` で true
+          conv =>
+            lhs
+            unfold clearPivotCol_loop
+            simp [hi_lt, hrow_eq]
+          have : row < m := by
+            rw [hrow_eq] at hi_lt
+            exact hi_lt
+          simp [this, hrow_eq]
+
+        -- 行 row に関しても同じ
+        have hloop_row :
+          (clearPivotCol_loop R row col hcol i).A[row]'(
+            by
+              have hsize :=
+                preserve_rowSize_clearPivotCol_loop
+                  row col hcol i R
+              have : row < (clearPivotCol_loop R row col hcol i).A.size := by
+                rw [hsize]
+                simp [hrow]
+                exact Nat.le.intro hmi
+              exact this
+          ) =
+          (clearPivotCol_loop R row col hcol (i+1)).A[row]'(
+            by
+              have hsize :=
+                preserve_rowSize_clearPivotCol_loop
+                  row col hcol (i+1) R
+              have : row < (clearPivotCol_loop R row col hcol (i+1)).A.size := by
+                rw [hsize]
+                simp [hrow]
+                exact Nat.le.intro (by
+                  have : i + 1 + k = m := by
+                    rw [Nat.add_assoc, Nat.add_comm 1 k, hmi]
+                  exact this)
+              exact this
+          ) := by
+          simp [hloop]
+
+        -- これでゴールに到達
+        --   (loop i).A[row] = (loop (i+1)).A[row] = R.A[row]
+        -- の形
+        -- `' の index 証明付き版も `simp` でだいたいそのまま落ちる
+        -- （型が微妙に合わないなら `have` で配列等式→成分等式に落とす）
+        -- ここは `simp` ではなく `calc` で書くと分かりやすい：
+        -- （↓型の細かい所は環境に応じて微調整してね）
+        have hcore :
+          (clearPivotCol_loop R row col hcol i).A[row]'(
+            by
+              have hsize :=
+                preserve_rowSize_clearPivotCol_loop
+                  row col hcol i R
+              have : row < (clearPivotCol_loop R row col hcol i).A.size := by
+                rw [hsize]
+                simp [hrow]
+                exact Nat.le.intro hmi
+              exact this
+          ) = R.A[row]'(
+            by
+              have hsize : R.A.size = m := R.rowSize
+              simpa [hsize] using hrow
+          ) := by
+          calc
+            (clearPivotCol_loop R row col hcol i).A[row]'(
+              by
+                have hsize :=
+                  preserve_rowSize_clearPivotCol_loop
+                    row col hcol i R
+                have : row < (clearPivotCol_loop R row col hcol i).A.size := by
+                  rw [hsize]
+                  simp [hrow]
+                  exact Nat.le.intro hmi
+                exact this
+            )
+                = (clearPivotCol_loop R row col hcol (i+1)).A[row]'(
+                      by
+                        have hsize :=
+                          preserve_rowSize_clearPivotCol_loop
+                            row col hcol (i+1) R
+                        have : row < (clearPivotCol_loop R row col hcol (i+1)).A.size := by
+                          rw [hsize]
+                          simp [hrow]
+                          exact Nat.le.intro (by
+                            have : i + 1 + k = m := by
+                              rw [Nat.add_assoc, Nat.add_comm 1 k, hmi]
+                            exact this)
+                        exact this
+                    ) := hloop_row
+            _   = R.A[row]'(
+                      by
+                        have hsize : R.A.size = m := R.rowSize
+                        simpa [hsize] using hrow
+                  ) := hIH
+        exact hcore
+      · -- i ≠ row のとき：一度 rAxpy してから i+1 へ
+        have hi_lt' : i < m := hi_lt
+        -- fi, a, R' を定義（clearPivotCol_loop の定義と揃える）
+        let fi : Fin m :=
+          ⟨i, by simpa [R.rowSize] using hi_lt'⟩
+        let a : K := (matOf R) fi ⟨col, hcol⟩
+        let R' : Rectified m n K := rAxpy R i row (-a)
+        have hmi' : i + 1 + k = m := by
+          -- i + 1 + k = (i + k) + 1 = m
+          rw [Nat.add_assoc, Nat.add_comm 1 k, hmi]
+        -- IH を R', i+1 に適用
+        have hIH := ih (i+1) R' hmi' hmi_succ
+
+        -- rAxpy は src 行 row を変えない
+        have hsizeA : R.A.size = m := by simpa using R.rowSize
+        have hsrc : row < R.A.size := by
+          simpa [hsizeA] using hrow
+        have hdst : i < R.A.size := by
+          simpa [hsizeA] using hi_lt'
+        have hRow_un :
+          R'.A[row]'(
+            by
+              have hsize' := preserve_rowSize_rowAxpy
+                R.A R.rowSize i row (-a)
+                (by simpa [hsizeA] using hdst)
+                (by simpa [hsizeA] using hsrc) R.rect
+              have : R'.A.size = (rowAxpy i row (-a) R.A n R.rect).size := by
+                unfold R'
+                simp [rAxpy, hdst, hsrc]
+              have : row < R'.A.size := by
+                rw [this, hsize']
+                simp [hrow]
+              exact this
+            ) = R.A[row] := by
+          -- ここで既存の `rAxpy_src_row_unchanged` を使う想定。
+          -- 実際はインデックス証明を合わせるために
+          -- `simp [R', rowAxpy, fi, a]` で調整。
+          simpa [R', fi, a] using
+            rAxpy_src_row_unchanged R hsrc hdst hrow_eq (-a)
+
+        -- 1ステップ分のループの展開
+        have hloop :
+          (clearPivotCol_loop R row col hcol i).A[row]'(
+            by
+              have hsize :=
+                preserve_rowSize_clearPivotCol_loop
+                  row col hcol i R
+              have : row < (clearPivotCol_loop R row col hcol i).A.size := by
+                rw [hsize]
+                simp [hrow]
+                exact Nat.le.intro hmi
+              exact this
+          ) =
+            (clearPivotCol_loop R' row col hcol (i+1)).A[row]'(
+              by
+                have hsize :=
+                  preserve_rowSize_clearPivotCol_loop
+                    row col hcol (i+1) R'
+                have : row < (clearPivotCol_loop R' row col hcol (i+1)).A.size := by
+                  rw [hsize]
+                  simp [hrow]
+                  exact Nat.le.intro hmi'
+                exact this
+            ) := by
+          conv =>
+            lhs
+            unfold clearPivotCol_loop
+            simp [hi_lt', hrow_eq]
+
+        calc
+          (clearPivotCol_loop R row col hcol i).A[row]'(
+            by
+              have hsize :=
+                preserve_rowSize_clearPivotCol_loop
+                  row col hcol i R
+              have : row < (clearPivotCol_loop R row col hcol i).A.size := by
+                rw [hsize]
+                simp [hrow]
+                exact Nat.le.intro hmi
+              exact this
+          )
+              = (clearPivotCol_loop R' row col hcol (i+1)).A[row]'(
+                by
+                  have hsize :=
+                    preserve_rowSize_clearPivotCol_loop
+                      row col hcol (i+1) R'
+                  have : row < (clearPivotCol_loop R' row col hcol (i+1)).A.size := by
+                    rw [hsize]
+                    simp [hrow]
+                    exact Nat.le.intro hmi'
+                  exact this
+              ) := hloop
+          _   = R'.A[row]'(
+                by
+                  have hsize' := preserve_rowSize_clearPivotCol_loop
+                    row col hcol (i+1) R'
+                  have : row < (clearPivotCol_loop R' row col hcol (i+1)).A.size := by
+                    rw [hsize']
+                    simp [hrow]
+                    exact Nat.le.intro hmi'
+                  have hmi_le : (i + 1) ≤ m := by
+                    have : i + 1 + k = m := by
+                      rw [Nat.add_assoc, Nat.add_comm 1 k, hmi]
+                    exact Nat.le.intro this
+                  have hsize'' := hsize' hmi_le
+                  simp [hsize'', R'.rowSize.symm] at this
+                  exact this
+          ) := hIH
+          _   = R.A[row] := hRow_un
+
+  -- 本体：k := m - i で main を起動
+  intro R i hiA
+  have : i + (m - i) = m := Nat.add_sub_of_le hiA
+  exact main (m - i) i R this rfl
+
+/- clearPivotCol_loop の全ステップで pivot 行 `row` は不変 -/
+/- clearPivotCol_loop の全ステップで pivot 行 `row` は不変（Fin / `' 付き版） -/
+lemma clearPivotCol_loop_row_unchanged
+  {m n K} [Field K]
+  {row col : Nat}
+  (hrow : row < m) (hcol : col < n) :
+  ∀ (R : Rectified m n K) (i : Nat) (hiA : i ≤ m),
+    (clearPivotCol_loop R row col hcol i).A[row]'(by
+      -- row < (clearPivotCol_loop … i).A.size の証明
+      have hsize :=
+        preserve_rowSize_clearPivotCol_loop
+          (row := row) (col := col) (hcol := hcol)
+          (i := i) (R := R) hiA
+      have hr : row < m := hrow
+      -- hsize : size = m なので書き換え
+      simpa [hsize] using hr
+    )
+    =
+    R.A[row]'(by
+      -- row < R.A.size の証明
+      have hsize : R.A.size = m := by simpa using R.rowSize
+      have hr : row < m := hrow
+      have : row < R.A.size := by simpa [hsize] using hr
+      exact this
+    ) := by
+  classical
+  intro R i hiA
+  -- simple 版で行ベクトルの等式をもらう
+  have hArr :
+    (clearPivotCol_loop R row col hcol i).A[row]'(
+      by
+        -- row < (clearPivotCol_loop … i).A.size の証明
+        have hsize :=
+          preserve_rowSize_clearPivotCol_loop
+            (row := row) (col := col) (hcol := hcol)
+            (i := i) (R := R) hiA
+        have hr : row < m := hrow
+        -- hsize : size = m なので書き換え
+        simpa [hsize] using hr
+    ) = R.A[row]'(
+      by
+        have hsize : R.A.size = m := by simpa using R.rowSize
+        have hr : row < m := hrow
+        have : row < R.A.size := by simpa [hsize] using hr
+        exact this
+    ) :=
+    clearPivotCol_loop_row_unchanged_simple
+      (m := m) (n := n) (row := row) (col := col)
+      hrow hcol R i hiA
+
+  -- ゴールは「同じ Array・同じ index だが，index < size の証明だけ違う」2つの `get` の等式。
+  -- `simp [hArr]` で配列の等式を流し込めば，証明引数は proof-irrelevant なので潰れる。
+  simp [hArr]
+
+
+
+/- clearPivotCol は pivot 行 `row` の Array 行を変更しない -/
+lemma clearPivotCol_row_unchanged
+  {m n K} [Field K]
+  (R : Rectified m n K) {row col : Nat}
+  (hrowA : row < R.A.size) (hcol : col < n) :
+  (clearPivotCol R row col hcol).A[row]'(
+    by
+      have hsize := preserve_rowSize_clearPivotCol R row col hcol
+      have : m = R.A.size := R.rowSize.symm
+      simp [hsize, this, hrowA]
+  ) = R.A[row] := by
+  simp [R.rowSize] at hrowA
+  have h :=
+    clearPivotCol_loop_row_unchanged
+      (m := m) (n := n)
+      (row := row) (col := col)
+      hrowA hcol R 0
+  -- 定義展開
+  simpa [clearPivotCol] using h
+
+
+
+/- clearPivotCol は pivot 行 `row` の行ベクトルを変えない（matOf 版） -/
 lemma clearPivotCol_pivot_row_unchanged
   {m n K} [Field K]
-  (R : Rectified m n K) (row col : Nat) (hcol : col < n) :
-  (matOf (clearPivotCol R row col hcol)) ⟨row, by admit⟩
-    = (matOf R) ⟨row, by admit⟩ := by
-  admit
+  (R : Rectified m n K) {row col : Nat}
+  (hrow : row < m) (hcol : col < n) :
+  (matOf (clearPivotCol R row col hcol)) ⟨row, by
+    -- (clearPivotCol R …).A.size = m を使って row < m から証明
+    have hsize := (clearPivotCol R row col hcol).rowSize
+    -- hsize : (clearPivotCol R …).A.size = m
+    simpa [hsize] using hrow
+  ⟩
+    =
+  (matOf R) ⟨row, by
+    -- R.A.size = m を使って row < m から row < R.A.size を作る
+    have hsize := R.rowSize
+    simpa [hsize] using hrow
+  ⟩ := by
+  -- 行ベクトルの等式なので、列方向に funext すれば十分
+  funext j
+  -- matOf の定義を展開
+  -- 左辺：clearPivotCol 側
+  have hsize' :
+      (clearPivotCol R row col hcol).A.size = m :=
+    (clearPivotCol R row col hcol).rowSize
+  have hsizeR : R.A.size = m := R.rowSize
+
+  -- それぞれの `matOf` の定義で使う hiA を用意
+  have hrowA' : row < (clearPivotCol R row col hcol).A.size := by
+    simpa [hsize'] using hrow
+  have hrowA : row < R.A.size := by
+    simpa [hsizeR] using hrow
+
+  -- matOf の定義をそのまま書き下ろすと、
+  --   matOf R ⟨row,_⟩ j = (R.A[row])[j]
+  -- になるので、それを使って書き換える
+  simp [matOf, toMat, clearPivotCol_row_unchanged R hrowA hcol]
 
 
+
+/- clearPivotCol は pivot 成分が 1 なら、
+  pivot 列の pivot 行以外を 0 にする -/
 lemma clearPivotCol_pivot_col_other_rows_zero
   {m n K} [Field K]
-  (R : Rectified m n K) (row col : Nat) (hcol : col < n) :
+  (R : Rectified m n K) (row col : Nat)
+  (hrow : row < m) (hcol : col < n)
+  (hpiv : (matOf R)
+            ⟨row, by
+              -- row < m から row < R.A.size
+              have hsize : R.A.size = m := by
+                simpa using R.rowSize
+              simpa [hsize] using hrow
+            ⟩
+            ⟨col, hcol⟩ = 1) :
   let R₃ := clearPivotCol R row col hcol
-  ∀ i' : Fin m, i' ≠ ⟨row, by admit⟩ →
+  ∀ i' : Fin m, i' ≠ ⟨row, hrow⟩ →
     (matOf R₃) i' ⟨col, hcol⟩ = 0 := by
-    admit
+  classical
+  -- R₃ の定義を展開
+  intro R₃ i' hi'
+  -- R₃ = clearPivotCol R row col hcol = clearPivotCol_loop R row col hcol 0
+  have hsize_R : R.A.size = m := by
+    simpa using R.rowSize
+  have hrowA : row < R.A.size := by
+    simpa [hsize_R] using hrow
 
-/-- `clearPivotCol` は pivot 列より左の列 `j < col` を一切変えない。 -/
+  -- row 番号の Fin
+  let frow : Fin m := ⟨row, hrow⟩
+
+  -- 行 index を Fin m にキャストし直す補助
+  have hrow_cast :
+    (⟨row, by simpa [hsize_R] using hrowA⟩ : Fin m) = frow := by
+    simp [frow]
+
+  -- 行列 R での pivot 成分 = 1 を、Fin m 版に書き直す
+  have hpiv_fin :
+    (matOf R) frow ⟨col, hcol⟩ = 1 := by
+    -- hpiv は「row < R.A.size」を使った Fin で書いてあるので、
+    -- それを cast してあげる
+    have := hpiv
+    -- R の rowSize から index の一致を使って書き換える
+    -- （ここは simp で大抵落ちるはず）
+    -- 実際の環境に合わせて微調整が必要かも
+    simpa [frow, hsize_R] using this
+
+  -- ループ不変式をまとめた強い帰納法 lemma
+  have main :
+    ∀ (k i : Nat) (R' : Rectified m n K),
+      i + k = m →
+      -- 不変式：R' のサイズは m、pivot 行 col 成分は 1、
+      --         "すでに処理した行" (< i) の col 成分は 0
+      (matOf R') frow ⟨col, hcol⟩ = 1 →
+      (∀ j : Fin m, (j.val < i ∧ j ≠ frow) →
+        (matOf R') j ⟨col, hcol⟩ = 0) →
+      let R'' := clearPivotCol_loop R' row col hcol i
+      (matOf R'') frow ⟨col, hcol⟩ = 1 ∧
+      (∀ j : Fin m, (j.val < m ∧ j ≠ frow) →
+        (matOf R'') j ⟨col, hcol⟩ = 0) := by
+    intro k
+    induction k with
+    | zero =>
+      -- 残りステップ k = 0 の場合： i + 0 = m ⇒ i = m
+      intro i R' hmi hpiv' hcleared
+      have hi : i = m := by
+        simpa using hmi
+      -- もうこれ以上ループは何もせず R' を返す
+      -- clearPivotCol_loop R' ... m = R' （i < m が成り立たないので else branch）
+      have hloop :
+        clearPivotCol_loop R' row col hcol m = R' := by
+        have : ¬ m < m := Nat.lt_irrefl _
+        -- i = m の場合、if hi : i < m は false
+        simp [clearPivotCol_loop]
+      -- そのまま不変式を引き継ぐだけ
+      refine And.intro ?h_piv ?h_all
+      · -- pivot 行の pivot 成分は 1 のまま
+        subst hi
+        simpa [hloop] using hpiv'
+      · -- すべての j ≠ frow, j < m で col 成分は 0
+        intro j hj
+        have hj_lt : j.val < m := hj.1
+        have hj_ne : j ≠ frow := hj.2
+        -- j.val < m = i & j ≠ frow なので hcleared が使える
+        have h0 : (j.val < i ∧ j ≠ frow) := by
+          conv =>
+            arg 1
+            rw [hi]
+          simp [hj_lt, hj_ne]
+        have hz : matOf R' j ⟨col, hcol⟩ = 0 := hcleared j h0
+        subst hi
+        simpa [hloop] using hz
+
+    | succ k ih =>
+      -- 残りステップ k+1：まだ処理する行が残っているケース
+      intro i R' hmi hpiv' hcleared
+      -- i + (k+1) = m ⇒ i < m
+      have hi_lt : i < m := by
+        -- もし i ≥ m なら i + (k+1) ≥ m + 1 になって矛盾
+        by_contra hge
+        have hge' : m ≤ i := Nat.le_of_not_gt hge
+        have : m + 1 ≤ i + (k+1) := by
+          have : m ≤ i + k := by
+            have : i ≤ i + k := Nat.le_add_right i k
+            exact Nat.le_trans hge' this
+          exact Nat.succ_le_succ this
+        -- でも hmi : i + (k+1) = m
+        have : m + 1 ≤ m := by simp [← hmi] at this
+        exact Nat.not_le_of_gt (Nat.lt_succ_self m) this
+      -- clearPivotCol_loop の i ステップを 1 回展開
+      have hstep :
+        clearPivotCol_loop R' row col hcol i =
+        if hi : i < m then
+          let fi : Fin m := ⟨i, by simpa [R'.rowSize] using hi⟩
+          if hrow_i : i = row then
+            clearPivotCol_loop R' row col hcol (i+1)
+          else
+            let a : K := (matOf R') fi ⟨col, hcol⟩
+            let R'' : Rectified m n K := rAxpy R' i row (-a)
+            clearPivotCol_loop R'' row col hcol (i+1)
+        else
+          R' := by
+        conv =>
+          lhs
+          unfold clearPivotCol_loop
+
+      -- 以降、上の if の分岐ごとに場合分けする
+      by_cases hrow_i : i = row
+      · -- case 1: i = row → pivot 行はスキップして i+1 へ
+        -- R'' = clearPivotCol_loop R' ... (i+1)
+        have hR'' :
+          clearPivotCol_loop R' row col hcol i =
+          clearPivotCol_loop R' row col hcol (i+1) := by
+          conv =>
+            lhs
+            unfold clearPivotCol_loop
+          simp [hrow_i, hrow]
+
+        -- i = row なので、「i 未満の行」は「pivot 行 row 以外」のみ
+        -- pivot 行は不変なので、hpiv' と hcleared から不変式をそのまま i+1 に持ち上げられる
+        -- i+1 + k = m で ih を使う
+        have hmi' : (i+1) + k = m := by
+          -- hmi : i + (k+1) = m から
+          -- i + k.succ = i + k + 1
+          -- を使って整理
+          have := hmi
+          have : i + k.succ = i.succ + k := by
+            simp [Nat.add_comm, Nat.add_left_comm]
+          -- i + k.succ = m なので
+          calc
+            (i.succ + k) = i + k.succ := this.symm
+            _ = m := hmi
+
+        -- i 未満の行はすべて col 成分 0 なので、
+        -- i+1 未満の行も同じ条件を満たす（pivot 行 row は i と同じなので i 未満には現れない）
+        have hcleared' :
+          ∀ j : Fin m, (j.val < i.succ ∧ j ≠ frow) →
+            (matOf R') j ⟨col, hcol⟩ = 0 := by
+          intro j hj
+          have hj_lt : j.val < i.succ := hj.1
+          have hj_ne : j ≠ frow := hj.2
+          -- j.val < i.succ ⇒ j.val ≤ i なので、「i 未満 or = i」に分かれる
+          have hj_cases : j.val < i ∨ j.val = i := Nat.lt_or_eq_of_le (Nat.le_of_lt_succ hj_lt)
+          cases hj_cases with
+          | inl hj_lt_i =>
+            -- j.val < i かつ j ≠ frow なら hcleared がそのまま適用できる
+            have h0 : (j.val < i ∧ j ≠ frow) := ⟨hj_lt_i, hj_ne⟩
+            exact hcleared j h0
+          | inr hj_eq_i =>
+            -- j.val = i のとき：i = row なので j = frow になってしまい、
+            -- hj_ne と矛盾する。従ってこの分岐は発生しない。
+            have : j = frow := by
+              -- Fin.ext で j と frow の val が等しいことから導く
+              apply Fin.ext
+              simp [frow, hj_eq_i, hrow_i]  -- val が row で一致
+            exact (hj_ne this).elim
+
+        -- i+1 の地点で ih を適用
+        have hIH :=
+          ih (i+1) R' hmi' hpiv' hcleared'
+
+        -- clearPivotCol_loop R' ... i の結果 R'' と IH で使っている
+        -- clearPivotCol_loop R' ... (i+1) を同一視しておく
+        have hR''_IH :
+          clearPivotCol_loop R' row col hcol (i+1) =
+          clearPivotCol_loop R' row col hcol i := by
+          simp [hR'']  -- hR'' の向きを合わせる
+
+        -- goal: let R'' := clearPivotCol_loop R' ... i in ...
+        -- の形を整理
+        -- ここは `simp [hR'', hR''_IH]` でほぼそのまま IH を返せます
+        -- （実際のゴールと IH の型を見て調整してください）
+        -- 以下は少し手抜きの書き方：
+        simpa [hR''] using hIH
+
+      · -- case 2: i ≠ row → 行 i を pivot 行で掃き出す
+        -- この場合は
+        --   a := (matOf R') fi (col)
+        --   R'' := rAxpy R' i row (-a)
+        -- として i 行の col 成分を 0 にする
+        have hi_ne_row : i ≠ row := hrow_i
+
+        -- fi : Fin m, a : K, R'' : Rectified m n K
+        have hiA : i < R'.A.size := by
+          -- R'.A.size = m なので
+          have hsize : R'.A.size = m := by
+            simpa using (R'.rowSize)
+          simpa [hsize] using hi_lt
+        let fi : Fin m := ⟨i, by simpa [R'.rowSize] using hi_lt⟩
+        let a : K := (matOf R') fi ⟨col, hcol⟩
+        let R'' : Rectified m n K := rAxpy R' i row (-a)
+
+        -- pivot 行の pivot 成分は rAxpy しても変わらない（src 行不変）
+        have hrow_size' : row < R'.A.size := by
+          -- R'.A.size = m と hrow から
+          have hsize : R'.A.size = m := by
+            simpa using (R'.rowSize)
+          simpa [hsize] using hrow
+        have h_dst_size' : i < R'.A.size := hiA
+
+        have hpiv_R'' :
+          (matOf R'') frow ⟨col, hcol⟩ = 1 := by
+          -- まず Array レベルで「row 行は変わっていない」
+          have hrow_eq :
+            R''.A[row]'(
+              by
+                -- row < R''.A.size の証明
+                have hsize_R' : R'.A.size = m := by
+                  simpa using R'.rowSize
+                have hrow_m : row < m := hrow
+                have hsize_rowAxpy :=
+                  preserve_rowSize_rowAxpy
+                    R'.A R'.rowSize i row (-a)
+                    (by simpa [hsize_R'] using hi_lt)
+                    (by simpa [hsize_R'] using hrow_m)
+                    R'.rect
+                have hsize_R'' : R''.A.size = m := by
+                  -- yes-branch の rAxpy なので size = m
+                  unfold R''
+                  -- `preserve_rowSize_rowAxpy` の結論をそのまま使うなら
+                  -- simp 側は必要に応じて微調整してください
+                  simpa [rAxpy, h_dst_size', hrow_size'] using hsize_rowAxpy
+                -- これで row < R''.A.size
+                simpa [hsize_R''] using hrow_m
+            ) = R'.A[row] := by
+            -- ここは素直に rAxpy_src_row_unchanged を使うだけで OK
+            have h :=
+              rAxpy_src_row_unchanged
+                (R := R') (src := row) (dst := i)
+                (hsrc := hrow_size') (hdst := hiA) (a := (-a)) hi_ne_row
+
+            simp [R'', h]
+
+          -- この Array の等式から、行ベクトル (matOf _) frow の等式を得る
+          have hrow_mat :
+            (matOf R'') frow = (matOf R') frow := by
+            -- 列 j ごとに ext
+            funext j
+            -- matOf の定義が「i 行目は R.A[i] から作る」形になっているはずなので、
+            -- hrow_eq で R''.A[row] を R'.A[row] に書き換えれば両辺同じになります。
+            -- 実際の matOf の定義に合わせて simp の引数は調整してください。
+            simp [matOf, toMat, frow, hrow_eq]
+
+          -- この行ベクトルの等式から、col 成分の等式を取り出す
+          have h :=
+            congrArg (fun (r : Fin n → K) => r ⟨col, hcol⟩) hrow_mat
+
+          -- 右辺は hpiv' = 1 なので、あとはこれでおしまい
+          simpa [hpiv', frow] using h
+
+        -- i 行の col 成分は rAxpy で 0 になることを確認
+        have hcol_i_zero_R'' :
+          (matOf R'') ⟨i, by simpa [R''.rowSize] using hi_lt⟩ ⟨col, hcol⟩ = 0 := by
+          -- `fi` を Fin m として再確認
+          have hi_fin :
+              (⟨i, by simpa [R''.rowSize] using hi_lt⟩ : Fin m) = fi := by
+            -- fi := ⟨i, by simpa [R'.rowSize] using hi_lt⟩ なので
+            simp [fi]
+
+          -- R'' を rAxpy の定義で展開
+          unfold R''
+          -- i 行・col 列の成分を rowAxpy の定義まで落とす
+          -- ここでのキーは：dst = i の行は newRow になり、
+          -- その newRow の col 成分が `ri[col] + (-a) * rk[col]` であること
+          -- matOf, rowAxpy を unfold しつつ simp すると
+          -- その形まで落ちます。
+          -- 実際の matOf の定義に応じて `simp` の引数は微調整してください。
+          simp [rAxpy, hiA, hrow_size', rowAxpy, matOf, fi, a,
+          toMat, Array.setIfInBounds]
+          simp [matOf, toMat, frow] at hpiv'
+          simp [hpiv']
+        -- i 行以外（j.val < i の行）は hcleared から 0 のまま、
+        -- row 行は hpiv_R'' で pivot 成分 1 のまま、を不変式にして i+1 に進める。
+        -- このあたりは case (1) とほぼ同様に ih を呼ぶだけなので、
+        -- 省略します。
+        have hloop_i :
+            clearPivotCol_loop R' row col hcol i =
+              clearPivotCol_loop R'' row col hcol (i+1) := by
+            -- hi_lt : i < m, hrow_i : i ≠ row を使って if を潰す
+            have hi : i < m := hi_lt
+            conv =>
+              lhs
+              unfold clearPivotCol_loop
+            simp [hi, hrow_i, fi, a, R'']
+        have hmi' : (i+1) + k = m := by
+          -- hmi : i + (k+1) = m から単に結合律・交換律で書き換え
+          simpa [Nat.succ_eq_add_one,
+                Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hmi
+                  -- R'' に対する「i+1 未満の行は 0」の不変式を作る
+        have hcleared'' :
+          ∀ j : Fin m, (j.val < i.succ ∧ j ≠ frow) →
+            matOf R'' j ⟨col, hcol⟩ = 0 := by
+          intro j hj
+          have hj_lt : j.val < i.succ := hj.1
+          have hj_ne : j ≠ frow := hj.2
+          have hj_le : j.val ≤ i := Nat.le_of_lt_succ hj_lt
+          have hj_cases : j.val < i ∨ j.val = i :=
+            lt_or_eq_of_le hj_le
+          cases hj_cases with
+          | inl hj_lt_i =>
+            -- j.val < i のとき: 「古い行」なので hcleared と
+            -- 「その行は rAxpy で変わらない」補題を使う
+            have hz_R' : matOf R' j ⟨col, hcol⟩ = 0 :=
+              hcleared j ⟨hj_lt_i, hj_ne⟩
+
+            have hrow_eq :
+              R''.A[j.val]'(by
+                -- j.val < R''.A.size の証明 (size = m) は
+                -- hDstSize, preserve_rowSize_rowAxpy と同様のやり方で作る
+                have hsize_R' : R'.A.size = m := by
+                  simpa using R'.rowSize
+                have hsize_rowAxpy :=
+                  preserve_rowSize_rowAxpy
+                    R'.A R'.rowSize i row (-a)
+                    (by simpa [hsize_R'] using hi_lt)
+                    (by simpa [hsize_R'] using hrow)
+                    R'.rect
+                have hsize_R'' : R''.A.size = m := by
+                  -- yes-branch の rAxpy なので size = m
+                  unfold R''
+                  simpa [rAxpy, hiA, hrow_size'] using hsize_rowAxpy
+                have hj_m : j.val < m := by
+                  simp
+                simp [hsize_R'', hj_m]
+              ) = R'.A[j.val]'(by
+                -- j.val < R'.A.size の証明
+                have hsize_R' : R'.A.size = m := by
+                  simpa using R'.rowSize
+                have hj_m : j.val < m := by
+                  simp
+                simp [hsize_R', hj_m]
+              ) := by
+              -- rAxpy_other_row_unchanged を使う想定
+              have h :=
+                rAxpy_other_row_unchanged
+                  (R := R') (src := row) (dst := i)
+                  (hsrc := hrow_size') (hdst := hiA)
+                  (hj := by
+                    -- j.val < R'.A.size の証明
+                    have hsize_R' : R'.A.size = m := by
+                      simpa using R'.rowSize
+                    have hj_m : j.val < m := by
+                      simp
+                    simp [hsize_R']
+                  )
+                  (hjne := Nat.ne_of_lt hj_lt_i)
+                  (a := -a)
+              simp [R'', h]
+
+            have hmat_eq :
+              matOf R'' j ⟨col, hcol⟩ =
+              matOf R' j ⟨col, hcol⟩ := by
+              -- hrow_eq を matOf レベルに上げる（列ごとに ext / simp）
+              simp [matOf, toMat, hrow_eq]
+
+            simpa [hmat_eq] using hz_R'
+          | inr hj_eq_i =>
+            -- j.val = i のとき: まさに掃き出した行なので hcol_i_zero_R''
+            have : j = ⟨i, hi_lt⟩ := by
+              apply Fin.ext
+              simp [hj_eq_i]
+            subst this
+            simpa using hcol_i_zero_R''
+                  -- ここで IH を R'', i+1 に適用
+        have hIH := ih (i+1) R'' hmi' hpiv_R'' hcleared''
+        rcases hIH with ⟨hpiv_loop, hzeros_loop⟩
+
+        refine And.intro ?h_piv_1 ?h_all_2
+        · -- h_piv_1: pivot entry after step i is still 1
+          -- i ステップ目のループ展開
+          -- hloop_i で clearPivotCol_loop R' ... i と同一視
+          have hpiv_goal :
+            matOf (clearPivotCol_loop R' row col hcol i)
+                  frow ⟨col, hcol⟩ = 1 := by
+            simpa [hloop_i] using hpiv_loop
+
+          exact hpiv_goal
+        · -- h_all_2: all other entries in pivot column are zero
+          intro j hj
+          -- hzeros_loop は R'' 版についての主張：
+          --   matOf (clearPivotCol_loop R'' ... (i+1)) j col = 0
+          -- それを hloop_i で R' 版に引き戻す
+          have hz :
+            matOf (clearPivotCol_loop R'' row col hcol (i+1))
+                  j ⟨col, hcol⟩ = 0 :=
+            hzeros_loop j hj
+          simpa [hloop_i] using hz
+  -- ここまでで main ができたとして、i = 0, R' = R からスタート
+  have hmain0 :
+    let R'' := clearPivotCol_loop R row col hcol (0 : ℕ);
+    (matOf R'') frow ⟨col, hcol⟩ = 1 ∧
+    ∀ j : Fin m, (j.val < m ∧ j ≠ frow) →
+      (matOf R'') j ⟨col, hcol⟩ = 0 := by
+    have hmi : 0 + m = m := by simp
+    have hcleared0 :
+      ∀ j : Fin m, (j.val < 0 ∧ j ≠ frow) →
+        (matOf R) j ⟨col, hcol⟩ = 0 := by
+      intro j hj
+      -- j.val < 0 は成り立たないので矛盾から何でも言える
+      exact (Nat.not_lt_zero _ hj.1).elim
+    simpa using main m 0 R hmi hpiv_fin hcleared0
+
+  -- clearPivotCol = clearPivotCol_loop ... 0
+  have hR₃ :
+    clearPivotCol R row col hcol =
+    clearPivotCol_loop R row col hcol 0 := rfl
+
+  -- hmain0 から欲しい主張を取り出す
+  -- let R₃ := clearPivotCol R ... を使う形に合わせる
+  have hR₃_spec := hmain0
+  -- R₃ に書き換え
+  rcases hR₃_spec with ⟨hpiv_R₃, hcol_zero_R₃⟩
+
+  -- 最終ゴール：R₃ の pivot 列の pivot 行以外は 0
+  -- つまり hcol_zero_R₃ をそのまま使えばよい
+  -- i' : Fin m, i' ≠ frow
+  -- かつ i'.val < m は自明なので、それを渡す
+  have hi_lt : i'.val < m := i'.is_lt
+  have : i'.val < m ∧ i' ≠ frow := ⟨hi_lt, hi'⟩
+  simpa [hR₃, frow] using hcol_zero_R₃ i' this
+
+
+lemma rAxpy_dst_row_only
+  {m n K} [Field K]
+  (R : Rectified m n K)
+  {src dst : Nat} (hsrc : src < R.A.size) (hdst : dst < R.A.size)
+  {j : Nat} (hj : j < R.A.size) (h_ne : j ≠ dst) (a : K) :
+  (rAxpy R dst src a).A[j]'(by
+    -- j < (rAxpy R dst src a).A.size の証明（size = m）を作る
+    have hsize : (rAxpy R dst src a).A.size = m := by
+      -- これは preserve_rowSize_rowAxpy から出てくるはず
+      have hsize' :=
+        preserve_rowSize_rowAxpy R.A R.rowSize dst src a
+          (
+            by
+              have hsizeA : R.A.size = m := R.rowSize
+              simpa [hsizeA] using hdst
+          )
+          (
+            by
+              have hsizeA : R.A.size = m := R.rowSize
+              simpa [hsizeA] using hsrc
+          )
+          R.rect
+      simp [rAxpy, hsrc, hdst, hsize']
+    -- これで j < (rAxpy R dst src a).A.size
+    have : m = R.A.size := R.rowSize.symm
+    simp [hsize, this, hj]
+  ) = R.A[j]'(by
+    -- j < R.A.size の証明は hj そのもの
+    exact hj
+  ) := by
+  -- rAxpy の定義から、dst 行以外は set! されないのでそのまま
+  unfold rAxpy
+  -- yes-branch の if を潰す
+  simp [hsrc, hdst, rowAxpy, Array.setIfInBounds, Array.getElem_set, h_ne.symm]
+
+
+lemma matOf_rAxpy_other_row
+  {m n K} [Field K]
+  (R : Rectified m n K)
+  {src dst : Nat} (hsrc : src < R.A.size) (hdst : dst < R.A.size)
+  {i' : Fin m} (h_ne : i'.val ≠ dst) (a : K) :
+  (matOf (rAxpy R dst src a)) i' =
+  (matOf R) i' := by
+  -- 各列ごとに ext
+  funext j
+  -- 両辺を配列レベルに展開
+  -- （matOf の定義が `R.A[i'.val][j.val]` のはずなので `simp`）
+  have hj : i'.val < R.A.size := by
+    -- rowSize : R.A.size = m から
+    have hsize : R.A.size = m := R.rowSize
+    simp [hsize]
+  have hj' : i'.val < (rAxpy R dst src a).A.size := by
+    -- これも rowSize 保持補題から
+    have hsize :=
+      preserve_rowSize_rowAxpy R.A R.rowSize dst src a
+        (
+          by
+            have hsizeA : R.A.size = m := R.rowSize
+            simpa [hsizeA] using hdst
+        )
+        (
+          by
+            have hsizeA : R.A.size = m := R.rowSize
+            simpa [hsizeA] using hsrc
+        ) R.rect
+    have : (rAxpy R dst src a).A.size = m := by
+      simp [rAxpy, hsrc, hdst, hsize]
+    simp [this]
+
+  -- さっきの配列レベルの補題を使う
+  have hrow :=
+    rAxpy_dst_row_only (R := R)
+      (hsrc := hsrc) (hdst := hdst)
+      (j := i'.val) (hj := hj) (h_ne := h_ne) (a := a)
+
+  -- これを matOf に翻訳
+  simp [matOf, toMat, hrow]
+
+
+lemma matOf_rAxpy_dst_row_left_col
+  {m n K} [Field K]
+  (R : Rectified m n K)
+  {src dst : Nat} (hsrc : src < R.A.size) (hdst : dst < R.A.size)
+  (j : Fin n)
+  (h_pivot_left0 :
+    (matOf R) ⟨src, by
+      have hsize : R.A.size = m := R.rowSize
+      simpa [hsize] using hsrc
+    ⟩ j = 0)
+  (a : K) :
+  (matOf (rAxpy R dst src a)) ⟨dst, by
+    have : dst < m := by simpa [R.rowSize] using hdst
+    -- rowSize 保持から (rAxpy R ...).A.size = m
+    -- を使って dst < (rAxpy R ...).A.size にする
+    -- （ここも `preserve_rowSize_rowAxpy` から `simp` で落とす）
+    exact this
+  ⟩ j =
+  (matOf R) ⟨dst, by
+    have hsize : R.A.size = m := R.rowSize
+    simpa [hsize] using hdst
+  ⟩ j := by
+  -- rAxpy / rowAxpy / matOf を unfold すれば
+  -- 対象の成分は `ri[j] + a * rk[j]` という形になっているはずなので，
+  -- h_pivot_left0 を使って `rk[j] = 0` として消す。
+  -- だいたいこんな感じ：
+  unfold rAxpy
+  simp [hsrc, hdst, rowAxpy, matOf]  -- newRow[j] = old + a * pivot
+  -- ここで pivot の j 成分を `h_pivot_left0` で 0 にする
+  -- （必要なら matOf → Array の書き換えを `simp [matOf]` で）
+  have := h_pivot_left0
+  simp [matOf, toMat] at this
+
+  simp [toMat, this]  -- a * 0 = 0, old + 0 = old
+
+
+/- `clearPivotCol` は pivot 列より左の列 `j < col` を一切変えない。 -/
 lemma clearPivotCol_preserves_left_cols
   {m n K} [Field K]
   (R : Rectified m n K) (row col : Nat) (hcol : col < n)
@@ -4514,12 +5941,268 @@ lemma clearPivotCol_preserves_left_cols
   ∀ (i' : Fin m) (j : Fin n), (j : ℕ) < col →
     (matOf (clearPivotCol R row col hcol)) i' j =
     (matOf R) i' j := by
-  -- 証明スケッチ：
-  --   · clearPivotCol_loop の定義に沿って i で強い帰納法
-  --   · i ≠ row のとき、rowAxpy で列 j の値が変わらないことを示す
-  --   · そのために pivot 行の j 成分が 0 である h_pivot_left0 を使う
-  -- 時間の都合でここはスケッチだけにしますが、行数保持の補題と同じパターンです。
-  admit
+  -- row の Fin 版
+  let frow : Fin m := ⟨row, h_row_lt_m⟩
+
+  -- 強い帰納法：k = m - i
+  have main :
+    ∀ (k i : Nat) (R' : Rectified m n K),
+      i + k = m →
+      -- 不変式１：左側列は元の R と同じ
+      (∀ (i' : Fin m) (j : Fin n), (j : ℕ) < col →
+        (matOf R') i' j = (matOf R) i' j) →
+      -- 不変式２：pivot 行の左側列は 0
+      (∀ j : Fin n, (j : ℕ) < col →
+        (matOf R') frow j = 0) →
+      let R'' := clearPivotCol_loop R' row col hcol i
+      (∀ (i' : Fin m) (j : Fin n), (j : ℕ) < col →
+        (matOf R'') i' j = (matOf R) i' j) ∧
+      (∀ j : Fin n, (j : ℕ) < col →
+        (matOf R'') frow j = 0) := by
+    intro k
+    induction k with
+    | zero =>
+      intro i R' hmi h_inv h_piv
+      have hi : i = m := by simpa using hmi
+      -- i = m のとき clearPivotCol_loop R' ... m = R'
+      have hloop : clearPivotCol_loop R' row col hcol m = R' := by
+        simp [clearPivotCol_loop]  -- if hi : m < m is false
+      -- 左側列は不変式そのまま
+      refine And.intro ?h_eq ?h_piv'
+      · -- 左側列はそのまま
+        intro i' j hj
+        -- R'' = R' なので h_inv をそのまま使えばよい
+        have := h_inv i' j hj
+        -- R'' を clearPivotCol_loop ... m に戻してから hloop で R' に戻す
+        -- i = m を使って R'' の定義も m に書き換える
+        simpa [hi, hloop] using this
+      · -- pivot 行の左側も 0 のまま
+        intro j hj'
+        have := h_piv j hj'
+        simpa [hi, hloop] using this
+
+    | succ k ih =>
+      intro i R' hmi h_inv h_piv
+      -- i + (k+1) = m なら i < m
+      have hi_lt : i < m := by
+        by_contra hge
+        have hge' : m ≤ i := Nat.le_of_not_gt hge
+        have : m + 1 ≤ i + (k+1) := by
+          have : m ≤ i + k := by
+            have : i ≤ i + k := Nat.le_add_right i k
+            exact Nat.le_trans hge' this
+          exact Nat.succ_le_succ this
+        have : m + 1 ≤ m := by simp [← hmi] at this
+        exact Nat.not_le_of_gt (Nat.lt_succ_self m) this
+
+      -- 1 ステップ分展開
+      have hstep :
+        clearPivotCol_loop R' row col hcol i =
+        if hi : i < m then
+          let fi : Fin m := ⟨i, by simpa [R'.rowSize] using hi⟩
+          if hrow_i : i = row then
+            clearPivotCol_loop R' row col hcol (i+1)
+          else
+            let a : K := (matOf R') fi ⟨col, hcol⟩
+            let R'' : Rectified m n K := rAxpy R' i row (-a)
+            clearPivotCol_loop R'' row col hcol (i+1)
+        else
+          R' := by
+        conv => lhs; unfold clearPivotCol_loop
+
+      by_cases hrow_i : i = row
+      · ----------------------------------------------------------------
+        -- case 1: i = row → pivot 行はスキップして i+1 へ
+        ----------------------------------------------------------------
+        have hR'' :
+          clearPivotCol_loop R' row col hcol i =
+          clearPivotCol_loop R' row col hcol (i+1) := by
+          have hi : i < m := hi_lt
+          conv =>
+            lhs
+            unfold clearPivotCol_loop
+            simp [hi, hrow_i, h_row_lt_m]
+          conv =>
+            rhs
+            simp [hrow_i]
+
+        -- i+1 + k = m
+        have hmi' : (i+1) + k = m := by
+          -- i + (k+1) = m から
+          simpa [Nat.succ_eq_add_one,
+                Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hmi
+
+        -- i+1 未満の行についての不変式は h_inv から継承
+        have h_inv' :
+          ∀ i' : Fin m, ∀ j : Fin n, (j : ℕ) < col →
+            (matOf R') i' j = (matOf R) i' j := h_inv
+        have h_piv' :
+          ∀ j : Fin n, (j : ℕ) < col →
+            (matOf R') frow j = 0 := h_piv
+
+        have hIH := ih (i+1) R' hmi' h_inv' h_piv'
+        simp
+        refine And.intro ?h1 ?h2
+        · -- left cols same as R
+          intro i' j hj
+          have := hIH.1 i' j hj
+          -- R'' を clearPivotCol_loop ... (i+1) に戻してから hR'' で R' に戻す
+          simpa [hR''] using this
+        · -- pivot row left cols zero
+          intro j hj
+          have := hIH.2 j hj
+          simpa [hR''] using this
+
+      · ----------------------------------------------------------------
+        -- case 2: i ≠ row → 行 i を pivot 行で掃き出す
+        ----------------------------------------------------------------
+        have hi_ne_row : i ≠ row := hrow_i
+        -- インデックス関係
+        have hiA : i < R'.A.size := by
+          have hsize : R'.A.size = m := by simpa using R'.rowSize
+          simpa [hsize] using hi_lt
+        have hrowA : row < R'.A.size := by
+          have hsize : R'.A.size = m := by simpa using R'.rowSize
+          simpa [hsize] using h_row_lt_m
+
+        -- fi, a, R''
+        let fi : Fin m := ⟨i, by simpa [R'.rowSize] using hi_lt⟩
+        let a  : K := (matOf R') fi ⟨col, hcol⟩
+        let R'' : Rectified m n K := rAxpy R' i row (-a)
+
+        -- R'' に対しても「pivot 行左側は 0」「左側列は元の R と同じ」を示す
+
+        -- pivot 行左側 0：src 行は変わらない ＋ h_piv
+        have h_piv_R'' :
+          ∀ j : Fin n, (j : ℕ) < col →
+            (matOf R'') frow j = 0 := by
+          intro j hj
+          have hrow_eq :=
+            rAxpy_src_row_unchanged
+              (R := R') (src := row) (dst := i)
+              (hsrc := hrowA) (hdst := hiA) (a := -a)
+          -- matOf レベルに持ち上げて、h_piv を使う
+          -- （詳細は rAxpy_src_row_unchanged の型に合わせて調整）
+          have hrow_mat :
+            (matOf R'') frow = (matOf R') frow := by
+            funext j'
+            simp [matOf, R'', rAxpy, rowAxpy, toMat,
+            hiA, hrowA, Array.setIfInBounds, Array.getElem_set]
+            have : i ≠ frow.val := hi_ne_row
+            simp [this]
+          have := congrArg (fun r => r j) hrow_mat
+          -- R' 側の pivot 左列は 0
+          have hz := h_piv j hj
+          simpa [hz] using this
+
+        -- 左側列が R と同じ：行ごとに分けて処理
+        have h_inv_R'' :
+          ∀ i' : Fin m, ∀ j : Fin n, (j : ℕ) < col →
+            (matOf R'') i' j = (matOf R) i' j := by
+          intro i' j hj
+          by_cases hdst' : (i' : Nat) = i
+          · -- 行 i: new_i[j] = old_i[j] + (-a) * pivot_row[j] で pivot_row[j]=0
+            -- pivot 行左列 0 ＋ h_inv を使って new = old
+            have h_piv0 :
+              (matOf R') frow j = 0 := h_piv j hj
+            have h_old :
+              (matOf R') ⟨i, hi_lt⟩ j = (matOf R) ⟨i, hi_lt⟩ j :=
+              h_inv ⟨i, hi_lt⟩ j hj
+            -- ここで matOf_rAxpy_dst_row_left_col を使って
+            have hdst :=
+              matOf_rAxpy_dst_row_left_col
+                (R := R')
+                (src := row) (dst := i)
+                (hsrc := hrowA) (hdst := hiA)
+                (j := j)
+                (h_pivot_left0 :=
+                  by
+                    -- R' の pivot 左側 = R の pivot 左側 = 0
+                    -- h_inv と h_piv から引っ張る
+                    have := h_piv j hj
+                    have := congrArg id this
+                    simpa using this)
+                (a := -a)
+            -- R'' 側の i 行 j 列 = R' 側の i 行 j 列 = R 側の i 行 j 列
+            have := congrArg id hdst
+            subst hdst'
+            simpa [h_old] using this
+          · -- 行 i 以外: rAxpy_other_row_unchanged
+            have hi_ne : i'.val ≠ i := hdst'
+            have hrow_eq :=
+              matOf_rAxpy_other_row
+                (R := R') (src := row) (dst := i)
+                (hsrc := hrowA) (hdst := hiA)
+                (i' := i') (h_ne := hi_ne) (a := -a)
+            have h_old := h_inv i' j hj
+            simp [R'', hrow_eq, h_old]
+        -- ここで IH を R'', i+1 に適用
+                -- ここで IH を R'', i+1 に適用
+        have hmi' : (i+1) + k = m := by
+          simpa [Nat.succ_eq_add_one,
+                Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hmi
+        have hIH := ih (i+1) R'' hmi' h_inv_R'' h_piv_R''
+
+        -- hIH の `let R'' := ...` を消して、見やすい型にする
+        have hIH' :
+          (∀ (i' : Fin m) (j : Fin n), (j : ℕ) < col →
+              matOf (clearPivotCol_loop R'' row col hcol (i+1)) i' j = matOf R i' j)
+          ∧
+          (∀ (j : Fin n), (j : ℕ) < col →
+              matOf (clearPivotCol_loop R'' row col hcol (i+1)) frow j = 0) := by
+          simpa using hIH
+
+        rcases hIH' with ⟨h_inv_after, h_piv_after⟩
+
+                -- ここから main の結論を構成する部分
+        -- clearPivotCol_loop R' ... i と R'' ... (i+1) の同一視
+        have hloop_i :
+          clearPivotCol_loop R' row col hcol i =
+          clearPivotCol_loop R'' row col hcol (i+1) := by
+          have hi : i < m := hi_lt
+          conv =>
+            lhs
+            unfold clearPivotCol_loop
+            simp [hi, hrow_i, fi, a, R'']
+
+        -- 目標：
+        -- let R₀ := clearPivotCol_loop R' row col hcol i in
+        --   (∀ i' j, j < col → matOf R₀ i' j = matOf R i' j) ∧
+        --   (∀ j, j < col → matOf R₀ frow j = 0)
+        refine And.intro ?h_inv_final ?h_piv_final
+
+        · -- h_inv_final : 左側列は R と一致
+          intro i' j hj
+          -- h_inv_after は R'' 側の結果
+          have h := h_inv_after i' j hj
+          -- hloop_i で R' 側の行列に書き戻す
+          simpa [hloop_i] using h
+
+        · -- h_piv_final : pivot 行左側は 0
+          intro j' hj'
+          have h := h_piv_after j' hj'
+          simpa [hloop_i] using h
+
+
+  -- main を i = 0, R' = R に適用
+  have hmi0 : 0 + m = m := by simp
+  have h_inv0 :
+    ∀ i' j, (j : Fin n) < col →
+      (matOf R) i' j = (matOf R) i' j := by
+    intro i' j hj; rfl
+
+  have hmain0 := main m 0 R hmi0 h_inv0 h_pivot_left0
+
+  -- clearPivotCol = clearPivotCol_loop ... 0
+  have hR₃ :
+    clearPivotCol R row col hcol =
+      clearPivotCol_loop R row col hcol 0 := rfl
+
+  -- ゴール
+
+  have h_eq_all := hmain0.1  -- (∀ i' j, ...) 部分を取り出す
+
+  exact h_eq_all
 
 
 
@@ -4601,7 +6284,7 @@ lemma matOf_clearPivotCol_loop
 
         rcases ih R1 with ⟨E_rec, hE_rec_unit, hE_rec_mul⟩
 
-        refine ⟨E_rec ⬝ E_axpy, ?_, ?_⟩
+        refine ⟨E_rec * E_axpy, ?_, ?_⟩
         · -- IsUnit の合成
           exact isUnit_mul hE_rec_unit hE_axpy_unit
         · -- matOf (loop (succ i)) = (E_rec ⬝ E_axpy) * matOf R
@@ -4611,7 +6294,7 @@ lemma matOf_clearPivotCol_loop
                     simpa [h_loop_step]
             _   = E_rec * matOf R1 := hE_rec_mul
             _   = E_rec * (E_axpy * matOf R) := by simpa [R1] using hE_axpy_mul
-            _   = (E_rec ⬝ E_axpy) * matOf R := by
+            _   = (E_rec * E_axpy) * matOf R := by
                     simp [Matrix.mul_assoc]
     · -- hi : ¬ i < m  → ループ終了ケース
       -- clearPivotCol_loop R row col hcol i = R なので E = 1 でOK
@@ -4641,7 +6324,6 @@ lemma extendPivot_old
   unfold extendPivot
   simp [hi]
 
-
 lemma matOf_rScale_pivot
   {m n K} [Field K]
   (R : Rectified m n K) (row : Nat) (hrow : row < m) (k : K)
@@ -4656,11 +6338,7 @@ lemma matOf_rScale_pivot
     simpa [hsize] using hrow
   -- if_pos に落として、あとは rowScale 用の補題で落とす
   simp [hrowA, matOf, rowScale,
-  Array.setIfInBounds]  -- ← 自分の定義名に合わせて調整
-  conv =>
-    lhs
-    arg 1
-    simp [Array.getElem_set]
+  Array.setIfInBounds, toMat]
 
 
 lemma inv_step_some
@@ -4729,21 +6407,18 @@ lemma inv_step_some
   -- R₂ についての Inv（rowCount, colPtr, pivot はまだ同じ）
   have hInv_R₂ :
     Inv st.M0 R₂ st.rowCount st.colPtr st.pivot := by
-    -- rScale の補題を適用
     have hrow_lt_m : st.rowCount < m :=
       lt_of_le_of_lt h_row_le_i0 i0.is_lt
-    exact inv_after_rScale (R := R₁) (r0 := st.rowCount)
-      (c0 := st.colPtr) (p0 := st.pivot) hInv_R₁
-      (k := st.rowCount) (a := a⁻¹) (by
-        -- a⁻¹ の非零性は a ≠ 0 から
-        intro h_a_inv_zero
-        have h_a_zero : a = 0 := by
-          apply inv_eq_zero.1
-          exact h_a_inv_zero
-        exact ha_ne h_a_zero
-      )
-      hrow_lt_m
-
+    exact inv_after_rScale
+      (R := R₁) (M0 := st.M0)
+      (r0 := st.rowCount) (c0 := st.colPtr) (p0 := st.pivot)
+      hInv_R₁ (a := a⁻¹) (
+        by
+          intro ha0
+          apply ha_ne
+          have := congrArg id ha0
+          simpa using this
+      ) hrow_lt_m
   -- ここから R₂, new_r, new_c, new_piv で Inv を作る
   -- 実際には hInv_R₂ と findPivot_spec_some_min / eq_some_iff を組み合わせて
   -- I1_bound, I1_mono, I1_in, I2_unit, I3_left0, I4_tail0, I5_fac をすべて埋めます。
@@ -4835,21 +6510,68 @@ lemma inv_step_some
       (matOf R₂) ⟨st.rowCount, h_row_lt_m⟩ := by
       simpa [R₃] using
         clearPivotCol_pivot_row_unchanged
-          (R := R₂) (row := st.rowCount) (col := st.colPtr) (hcol := hcol)
+          (R := R₂) (row := st.rowCount) (col := st.colPtr) (hrow := h_row_lt_m) (hcol := hcol)
 
     -- 「pivot 列 st.colPtr で pivot 行以外は 0」
+    -- pivot 行 (rowCount) の pivot 成分は R₂ では 1
+    have h_unit_piv_R₂ :
+      (matOf R₂) ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ = 1 := by
+      -- rScale の matOf 用補題で pivot 行の成分を展開
+      have hscale :
+        (matOf R₂) ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ =
+          (a⁻¹) * (matOf R₁) ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ := by
+        -- R₂ = rScale R₁ st.rowCount (a⁻¹) を使って書き換え
+        simpa [R₂] using
+          (matOf_rScale_pivot
+            (R := R₁)
+            (row := st.rowCount)
+            (hrow := h_row_lt_m)
+            (k := a⁻¹)
+            (j := ⟨st.colPtr, hcol⟩))
+
+      -- a の定義はちょうど R₁ の (rowCount, colPtr) 成分
+      have hR₁_piv :
+        (matOf R₁) ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ = a := by
+        -- a はその成分として定義してあるので simp で終わる
+        simp [a]
+
+      -- 右辺を a⁻¹ * a に書き換える
+      have hscale' :
+        (matOf R₂) ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ =
+          a⁻¹ * a := by
+        simpa [hR₁_piv] using hscale
+
+      -- Field なので a ≠ 0 から a⁻¹ * a = 1
+      have hmul : a⁻¹ * a = (1 : K) := by
+        -- `simp [ha_ne]` で大抵通る
+        have : a ≠ 0 := ha_ne
+        -- `simp` はデフォで `inv_mul_cancel` 系を使ってくれる
+        simp [this]  -- a⁻¹ * a = 1
+
+      -- まとめて 1 に落とす
+      simp [hscale', hmul]
+
+
     have h_pivot_col_other_rows_zero :
       ∀ i' : Fin m,
         i' ≠ ⟨st.rowCount, h_row_lt_m⟩ →
         (matOf R₃) i' ⟨st.colPtr, hcol⟩ = 0 := by
       -- 補題の形に合わせて書き換え
       intro i' hi'
-      have := clearPivotCol_pivot_col_other_rows_zero
-        (R := R₂) (row := st.rowCount) (col := st.colPtr) (hcol := hcol)
-      -- 補題は `let R₃ := ...` としているので `simp` で展開
-      -- だいたいこんな感じになるはず
-      -- （補題の本当の statement に応じて微調整）
-      simpa [R₃] using (this i' hi')
+      have h :=
+        clearPivotCol_pivot_col_other_rows_zero
+          (R := R₂)
+          (row := st.rowCount)
+          (col := st.colPtr)
+          (hrow := h_row_lt_m)
+          (hcol := hcol)
+          (hpiv := h_unit_piv_R₂)
+      -- h : let R₃' := clearPivotCol R₂ ...; ∀ i' ≠ ..., matOf R₃' i' col = 0
+      -- このファイル内の R₃ = clearPivotCol R₂ ... なので simp で一致させる
+      have : (matOf (clearPivotCol R₂ st.rowCount st.colPtr hcol))
+              i' ⟨st.colPtr, hcol⟩ = 0 :=
+        h i' hi'
+      simpa [R₃] using this
 
     have old_or_new (i : Fin new_r) :
       (i.val < st.rowCount) ∨ (i = Fin.last st.rowCount) := by
@@ -5047,11 +6769,6 @@ lemma inv_step_some
             -- R₂ の方で pivot 行の pivot 成分が 1 であること
       have h_unit_piv_R₂ :
         (matOf R₂) ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ = 1 := by
-        -- ここは rScale の matOf 用補題を使う
-        -- 例えばこんな形の補題を持っているとする：
-        -- matOf_rScale :
-        --   matOf (rScale R r k) i j =
-        --     (if h : i.1 = r then k * matOf R ⟨r, _⟩ j else matOf R i j)
         have h :
           matOf R₂ ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ =
             a⁻¹ * matOf R₁ ⟨st.rowCount, h_row_lt_m⟩ ⟨st.colPtr, hcol⟩ := by
@@ -5076,13 +6793,8 @@ lemma inv_step_some
           have ha_unit : IsUnit a := by
             -- Field K なので a ≠ 0 から unit を作れる（`isUnit_iff_ne_zero` 的な補題）
             simp [ha_ne]
-          -- a⁻¹ は `IsUnit` から来た逆元と同じなので、ここは手持ちの補題に依存
-          -- 簡易的には `simp [this]` で済むはず
-          -- （環境によっては `simp [ha_unit.mul, IsUnit.mul]` 等で整える）
-          simp [a, ha_ne]  -- だいたいこんなノリ
-        -- まとめて 1 に書き換え
+          simp [a, ha_ne]
         simp [ h, h_swap, hR, this ]
-
 
       -- あとで使いやすいように別名にしておく
       let h_one_R₂ := h_unit_piv_R₂
