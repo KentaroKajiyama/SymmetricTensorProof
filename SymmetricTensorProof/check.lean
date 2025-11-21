@@ -7288,12 +7288,13 @@ def μ_exec {m n K} [Field K] (st : GEExecState m n K) : Nat := n - st.colPtr
 
 -- 1 ステップ進める関数（証明版）
 noncomputable def geStepP
-  {m n K} [Field K] (st : GEStateP m n K) (hcol : st.colPtr < n) : GEStateP m n K :=
-  match findPivot_spec st hcol with
+  {m n K} [Field K]
+  (st : GEStateP m n K) (hcol : st.colPtr < n) : GEStateP m n K :=
+  match hsearch : findPivot_spec st hcol with
   | none =>
       let new_c := st.colPtr + 1
       have inv' : Inv st.M0 st.R st.rowCount new_c st.pivot :=
-        inv_step_none hcol (by admit)
+        inv_step_none hcol hsearch
       {
         M0 := st.M0,
         R := st.R,
@@ -7306,26 +7307,73 @@ noncomputable def geStepP
       let R₁ := rSwap st.R st.rowCount i0.val
       let a  := (matOf R₁) ⟨st.rowCount, _⟩ ⟨st.colPtr, _⟩
       let R₂ := rScale R₁ st.rowCount (a⁻¹)
-      let R₃ := R₂ -- 後でrAxpyで他行消去する
+      let R₃ := clearPivotCol R₂ st.rowCount st.colPtr hcol
       let new_r   := st.rowCount + 1
       let new_c   := st.colPtr + 1
       let new_piv := extendPivot st.pivot ⟨st.colPtr, _⟩
-      have inv' : Inv st.M0 R₃ new_r new_c new_piv :=
-        -- TODO: findPivot を埋めたらここも埋める
-        inv_step_some hcol (by admit)
+      have inv' : Inv st.M0 R₃ new_r new_c new_piv := inv_step_some hcol hsearch
       { M0 := st.M0, R := R₃, rowCount := new_r, colPtr := new_c, pivot := new_piv, inv := inv' }
 
--- 1 ステップ進める関数（実行版）
-def stepKernel {m n K} [Field K] (st : GEExecState m n K)
-  : GEExecState m n K :=
-  if h : st.rowCount < m ∧ st.colPtr < n then
-    -- ★ ここに「1ステップ進める処理」（pivot 探索＋rSwap＋rScale＋rAxpy）を書く
-    --     まだ実装してなくて OK。後で書き換えられるように placeholder にしておいてもいい。
-    st  -- TODO: 実際のアルゴリズムに差し替え
-  else
-    -- すでに doneExecP st （= ¬(rowCount< m ∧ colPtr< n)） のときはこちら
-    st
+------------------------------------------------------------------
+-- 補助関数: ピボットマップの拡張 (geStepP の extendPivot に相当)
+------------------------------------------------------------------
+/- 既存の写像 f : Fin n → α に、新しい値 a : α を末尾に追加して Fin (n+1) → α を作る -/
+def extendPivot_exec
+  {k : Nat} {α : Type u}
+  (f : Fin k → α) (a : α) : Fin (k + 1) → α :=
+  Fin.snoc f a
 
+------------------------------------------------------------------
+-- 実装: stepKernel
+------------------------------------------------------------------
+
+/-
+  Gaussian Elimination の 1 ステップ（実行版）。
+  geStepP と完全に構造を一致させており、erase との可換性が示しやすいようになっています。
+-/
+def stepKernel
+  {m n K} [Field K] [DecidableEq K]
+  (st : GEExecState m n K) : GEExecState m n K :=
+  if h : st.rowCount < m ∧ st.colPtr < n then
+    -- 証明版の findPivot_spec に対応する実行版 findPivot_exec を呼ぶ
+    match findPivot_exec st h.2 with
+    | none =>
+        -- Pivot が見つからなかった場合: colPtr だけ進める
+        { st with
+          colPtr := st.colPtr + 1
+        }
+    | some i0 =>
+        -- Pivot が見つかった場合 (i0 は Fin m)
+        let r := st.rowCount
+        let c := st.colPtr
+
+        -- 1. Swap: 行 r と 行 i0 を入れ替え
+        let R₁ := rSwap st.R r i0
+
+        -- 2. Scale: 行 r の先頭係数 a を取得して正規化
+        --    実行用なので Fin の証明は h から生成
+        let fi : Fin m := ⟨r, h.1⟩
+        let fj : Fin n := ⟨c, h.2⟩
+        let a  := (matOf R₁) fi fj
+        let R₂ := rScale R₁ r (a⁻¹)
+
+        -- 3. Eliminate: 他の行を掃き出し (clearPivotCol は実行可能関数と想定)
+        let R₃ := clearPivotCol R₂ r c h.2
+
+        -- 4. Update State: カウンタとピボット情報を更新
+        let new_r   := r + 1
+        let new_c   := c + 1
+        let new_piv := extendPivot st.piv fj
+
+        { M0 := st.M0
+        , R := R₃
+        , rowCount := new_r
+        , colPtr := new_c
+        , piv := new_piv
+        }
+  else
+    -- 停止条件を満たしている場合は何もしない
+    st
 -- TODO: 1 ステップの関数を実装する。証明と実行用を分けて後でつなぐ。
 
 /- -/
