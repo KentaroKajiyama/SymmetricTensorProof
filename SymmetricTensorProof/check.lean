@@ -3281,8 +3281,7 @@ lemma findPivot_spec_vs_exec
 lemma inv_step_none
   {m n K} [Field K] {st : GEStateP m n K} (hcol : st.colPtr < n)
   (hnone : findPivot_spec st hcol = none)
-  : Inv st.M0 st.R st.rowCount (st.colPtr + 1) st.pivot :=
-by
+  : Inv st.M0 st.R st.rowCount (st.colPtr + 1) st.pivot := by
   classical
   -- もとの不変量を省略記法で
   have hInv := st.inv
@@ -5929,6 +5928,25 @@ lemma matOf_rAxpy_dst_row_left_col
 
   simp [toMat, this]  -- a * 0 = 0, old + 0 = old
 
+lemma matOf_rAxpy_dst_row
+  {m n K} [Field K]
+  (R : Rectified m n K) {i k : Nat}
+  (hi : i < m) (hk : k < m) (a : K) (c : Fin n) :
+  matOf (rAxpy R i k a) ⟨i, hi⟩ c
+    = matOf R ⟨i, hi⟩ c + a * matOf R ⟨k, hk⟩ c := by
+  unfold matOf rAxpy rowAxpy toMat
+  simp [R.rowSize]
+  simp [hi, hk]
+
+
+lemma matOf_rAxpy_other_row'
+  {m n K} [Field K]
+  (R : Rectified m n K) {i k : Nat}
+  (hi : i < m) (hk : k < m)
+  {r : Fin m} (hne : (r : ℕ) ≠ i) (a : K) (c : Fin n) :
+  matOf (rAxpy R i k a) r c = matOf R r c := by
+  unfold matOf rAxpy rowAxpy toMat
+  simp [R.rowSize, hi, hk, Array.setIfInBounds, hne.symm]
 
 /- `clearPivotCol` は pivot 列より左の列 `j < col` を一切変えない。 -/
 lemma clearPivotCol_preserves_left_cols
@@ -6205,117 +6223,212 @@ lemma clearPivotCol_preserves_left_cols
   exact h_eq_all
 
 
+/- 行 i に 行 k の a 倍を足す基本行列: (1 + a * E_{ik}) -/
+def rAxpyMatrix
+  {m K} [Field K]
+  (i k : Fin m) (a : K)
+  : Matrix (Fin m) (Fin m) K :=
+  1 + Matrix.single i k a
+
+/- i ≠ k のとき、基本行列の逆行列は a を -a にしたもの -/
+lemma isUnit_rAxpyMatrix
+  {m K} [Field K]
+  (i k : Fin m) (a : K) (hik : i ≠ k) :
+    IsUnit (rAxpyMatrix i k a) := by
+  let E := rAxpyMatrix i k a
+  let E_inv := rAxpyMatrix i k (-a)
+  have h_add : Matrix.single i k a + Matrix.single i k (-a) = 0 := by
+    simp [(Matrix.single_add i k a (-a)).symm]
+  have h_add' : Matrix.single i k (-a) + Matrix.single i k a = 0 := by
+    conv =>
+      lhs
+      simp [add_comm]
+    exact h_add
+  have h_sq : single i k a * single i k (-a) = 0 :=
+    Matrix.single_mul_single_of_ne (c:=a) (i:=i) (j:=k) (k:=i) (h:=hik.symm) (d:=-a)
+  have h_sq' : Matrix.single i k (-a) * Matrix.single i k a = 0 :=
+    Matrix.single_mul_single_of_ne (c:=-a) (i:=i) (j:=k) (k:=i) (h:=hik.symm) (d:=a)
+  have h_mul : E * E_inv = 1 := by
+    simp [E, E_inv, rAxpyMatrix]
+    -- (1 + A)(1 + B) = 1 + A + B + AB
+    rw [add_mul, mul_add, mul_add, Matrix.one_mul, Matrix.mul_one]
+    -- A + B = a * e_ik + (-a) * e_ik = 0
+    conv =>
+      lhs
+      arg 2
+      simp [h_sq]
+    conv =>
+      lhs
+      arg 1
+      simp
+    simp [add_comm]
+    conv =>
+      lhs
+      simp [<-add_assoc]
+      arg 1
+      rw [h_add]
+    simp
+
+  refine ⟨⟨E, E_inv, h_mul, ?_⟩, rfl⟩
+  -- 左逆も同様
+  simp [E, E_inv, rAxpyMatrix]
+  rw [add_mul, mul_add, mul_add, Matrix.one_mul, Matrix.mul_one]
+  simp [h_sq', add_assoc, h_add]
+
+/- 行列積の成分計算: (E * A) r c の挙動 -/
+lemma rAxpyMatrix_mul_apply
+  {m n K} [Field K]
+  (A : Matrix (Fin m) (Fin n) K)
+  (i k : Fin m) (a : K) (r : Fin m) (c : Fin n) :
+    (Matrix.mulᵣ (rAxpyMatrix i k a)  A) r c =
+      if r = i then A i c + a * A k c else A r c := by
+  conv => lhs; simp
+  rw [rAxpyMatrix, Matrix.add_mul, Matrix.one_mul]
+  dsimp
+  split_ifs with h
+  · rw [h]; simp
+  · simp
+    exact Matrix.single_mul_apply_of_ne a i k r c h A
+
+------------------------------------------------------------------
+-- 4. メインの補題: matOf_rAxpy
+------------------------------------------------------------------
 
 lemma matOf_rAxpy
   {m n K} [Field K]
-  (R : Rectified m n K) (i k : Nat) (a : K) :
+  (R : Rectified m n K) {i k : Nat}
+  (hi : i < m) (hk : k < m) (hik : i ≠ k) (a : K) :
   ∃ (E : Matrix (Fin m) (Fin m) K),
     IsUnit E ∧
     matOf (rAxpy R i k a) = Matrix.mulᵣ E (matOf R) := by
-    admit
+  classical
+  -- Fin index
+  let fi : Fin m := ⟨i, hi⟩
+  let fk : Fin m := ⟨k, hk⟩
+  let E := rAxpyMatrix fi fk a
 
+  -- 1. IsUnit の証明 (先ほどの補題を使用)
+  have hE_unit : IsUnit E := by
+    apply isUnit_rAxpyMatrix
+    intro h_eq
+    apply hik
+    injection h_eq
+
+  -- 2. 作用結果の一致
+  have hE_action : matOf (rAxpy R i k a) = Matrix.mulᵣ E (matOf R) := by
+    ext r c
+    -- 右辺の挙動
+    let A := matOf R
+    have h_right : (Matrix.mulᵣ E  A) r c = if r = fi then A fi c + a * A fk c else A r c := by
+      apply rAxpyMatrix_mul_apply
+
+    -- 左辺の挙動
+    have h_left : matOf (rAxpy R i k a) r c =
+        (if r = fi then A fi c + a * A fk c else A r c) := by
+      by_cases hri : r = fi
+      · rw [if_pos hri]
+        subst hri
+        apply matOf_rAxpy_dst_row (hi:=hi) (hk:=hk)
+      · rw [if_neg hri]
+        have hne : (r : ℕ) ≠ i := fun h => hri (Fin.ext h)
+        apply matOf_rAxpy_other_row' (hi:=hi) (hk:=hk) (hne:=hne)
+
+    rw [h_right, h_left]
+
+  exact ⟨E, hE_unit, hE_action⟩
+
+
+/-
+  clearPivotCol_loop の作用が、ある可逆行列 E を左から掛けることと等しいことを示す補題。
+  帰納法のために m - i の値 (len) で一般化して証明します。
+-/
 lemma matOf_clearPivotCol_loop
   {m n K} [Field K]
-  (R : Rectified m n K) (row col : Nat) (hcol : col < n) :
-  ∀ i,
-    ∃ (E : Matrix (Fin m) (Fin m) K),
-      IsUnit E ∧
-      matOf (clearPivotCol_loop R row col hcol i) = Matrix.mulᵣ E (matOf R) := by
-  classical
-  intro i
-  -- well-founded recursion on i
-  revert R
-  refine Nat.rec ?base ?step i
-  · -- base case: i = 0
-    intro R
-    -- ここは「0 からスタートして loop を最後まで回した結果が
-    -- 何か E * matOf R になっている」という形にしたいので、
-    -- 実際には base を「i が大きくてもう何もしないケース」に
-    -- 取るか、定義を `fix i` な形にするかで少し変わります。
-    -- ここではスケッチだけ書きます。
-    -- 実際には clearPivotCol_loop の定義に合わせて
-    -- パターンマッチしながら書き換えるイメージ。
-    admit
-  · -- step case
-    intro i ih R
-    -- clearPivotCol_loop R row col hcol (Nat.succ i) について
-    -- 定義を展開
-    dsimp [clearPivotCol_loop]  -- あなたの定義に合わせる
-    by_cases hi : i < m
-    · -- ループ継続ケース
-      -- ここで i = row のときは何もせず i+1 に進むので
-      -- E = ??? という扱い
-      by_cases hrow : i = row
-      · -- pivot 行：rAxpy しない ⇒ E は「このステップの単位行列」扱い
-        -- R' = R のまま i+1 へ
-        have h_step :
-          clearPivotCol_loop R row col hcol (i+1) =
-          clearPivotCol_loop R row col hcol (Nat.succ i) := rfl
-        -- 帰納法の仮定を R に適用
-        rcases ih R with ⟨E, hE_unit, hE_mul⟩
-        -- そのまま返すだけ
-        refine ⟨E, hE_unit, ?_⟩
-        simpa [h_step] using hE_mul
-      · -- i ≠ row のときは rAxpy をかけてから i+1 へ
-        -- 1. R1 := rAxpy R i row (-a)
-        -- 2. matOf R1 = E_axpy * matOf R
-        -- 3. clearPivotCol_loop R1 (i+1) = E_rec * matOf R1
-        -- 4. 掛け合わせて E_rec ⬝ E_axpy * matOf R
-        --   => 期待する形
-        -- ここで a := (matOf R) fi ⟨col, hcol⟩ をさっきの定義から取る
-        -- 以下スケッチ：
-        let fi : Fin m := ⟨i, by simpa [R.rowSize] using hi⟩
-        have hcol' : col < n := hcol
-        let a : K := (matOf R) fi ⟨col, hcol'⟩
-        let R1 : Rectified m n K := rAxpy R i row (-a)
-        have hi_m : i < m := hi   -- 必要なら書き換え
-        have hrow_m : row < m := by
-          -- row < m は別途前提として持っておく方が安全
-          admit
+  (R : Rectified m n K) (row col : Nat) (hrow : row < m) (hcol : col < n) (i : Nat) :
+  ∃ (E : Matrix (Fin m) (Fin m) K),
+    IsUnit E ∧
+    matOf (clearPivotCol_loop R row col hcol i) = Matrix.mulᵣ E (matOf R) := by
+  -- ループの停止条件である m - i を len と置き、len に関する帰納法で証明する
+  generalize h_len : m - i = len
+  induction len generalizing i R with
+  | zero =>
+    -- ■ Base case: len = 0 つまり i >= m の場合
+    -- ループは終了し、R をそのまま返す。対応する行列は単位行列 1。
+    exists 1
+    constructor
+    · exact isUnit_one
+    · -- clearPivotCol_loop の定義を展開
+      rw [clearPivotCol_loop]
+      -- i < m が False であることを示す
+      have hi_not : ¬(i < m) := by
+        -- m - i = 0 implies i >= m
+        omega
+      simp [hi_not]
 
-        -- rAxpy の行列版：matOf R1 = E_axpy * matOf R
-        rcases matOf_rAxpy R i row (-a) with
-          ⟨E_axpy, hE_axpy_unit, hE_axpy_mul⟩
+  | succ len' ih =>
+    -- ■ Step case: len = len' + 1 つまり i < m の場合
+    -- ループは続く
+    have hi : i < m := by omega
 
-        -- その後のループに帰納法適用
-        have h_loop_step :
-          clearPivotCol_loop R1 row col hcol (i+1) =
-          clearPivotCol_loop R row col hcol (Nat.succ i) := rfl
+    -- ループを1回展開
+    rw [clearPivotCol_loop]
+    simp [hi]
 
-        rcases ih R1 with ⟨E_rec, hE_rec_unit, hE_rec_mul⟩
+    -- i = row かどうかで分岐
+    by_cases hrow_eq : i = row
+    · -- case 1: i = row (pivot行なのでスキップ)
+      simp [hrow_eq]
+      -- 再帰呼び出し: clearPivotCol_loop R ... (i + 1)
+      -- 帰納法の仮定 (ih) を適用するための準備
+      have h_len_next : m - (i + 1) = len' := by omega
 
-        refine ⟨E_rec * E_axpy, ?_, ?_⟩
-        · -- IsUnit の合成
-          exact isUnit_mul hE_rec_unit hE_axpy_unit
-        · -- matOf (loop (succ i)) = (E_rec ⬝ E_axpy) * matOf R
-          calc
-            matOf (clearPivotCol_loop R row col hcol (Nat.succ i))
-                = matOf (clearPivotCol_loop R1 row col hcol (i+1)) := by
-                    simpa [h_loop_step]
-            _   = E_rec * matOf R1 := hE_rec_mul
-            _   = E_rec * (E_axpy * matOf R) := by simpa [R1] using hE_axpy_mul
-            _   = (E_rec * E_axpy) * matOf R := by
-                    simp [Matrix.mul_assoc]
-    · -- hi : ¬ i < m  → ループ終了ケース
-      -- clearPivotCol_loop R row col hcol i = R なので E = 1 でOK
-      have h_end : clearPivotCol_loop R row col hcol i = R := by
-        -- あなたの clearPivotCol_loop の定義に合わせて
-        -- simp [clearPivotCol_loop, hi]
-        admit
-      refine ⟨1, ?_, ?_⟩
-      · exact isUnit_one
-      · simpa [h_end, one_mul]  -- matOf R = 1 * matOf R
+      -- IH を適用 (R は変わらない)
+      obtain ⟨E_next, hE_next_unit, h_action⟩ := ih R (i + 1) h_len_next
+
+      exists E_next
+      simp [hrow_eq] at h_action
+      exact ⟨hE_next_unit, h_action⟩
+
+    · -- case 2: i ≠ row (掃き出し実行)
+      simp [hrow_eq]
+      -- 変数定義
+      let fi : Fin m := ⟨i, by simpa [R.rowSize] using hi⟩
+      let a : K := (matOf R) fi ⟨col, hcol⟩
+      let R' := rAxpy R i row (-a)
+
+      -- 1. まず、このステップ単体で行列 E_step が掛かることを確認 (matOf_rAxpy を利用)
+
+
+      have h_step : ∃ E_step, IsUnit E_step ∧ matOf R' = Matrix.mulᵣ E_step (matOf R) := by
+        exact matOf_rAxpy R hi hrow hrow_eq (-a)
+
+      obtain ⟨E_step, hE_step_unit, hR'_eq⟩ := h_step
+
+      -- 2. 再帰部分 (残り) に帰納法を適用
+      --    R が R' に変わっていることに注意
+      have h_len_next : m - (i + 1) = len' := by omega
+      obtain ⟨E_rest, hE_rest_unit, h_final⟩ := ih R' (i + 1) h_len_next
+
+      -- 3. 全体の行列 E = E_rest * E_step を構成
+      exists E_rest * E_step
+      constructor
+      · -- 可逆行列の積は可逆
+        exact IsUnit.mul hE_rest_unit hE_step_unit
+      · -- 作用の結合: final = E_rest * (matOf R') = E_rest * (E_step * matOf R)
+        rw [h_final, hR'_eq]
+        rw [Matrix.mul_assoc]
+        simp
 
 lemma matOf_clearPivotCol
   {m n K} [Field K]
-  (R : Rectified m n K) (row col : Nat) (hcol : col < n) :
+  (R : Rectified m n K) (row col : Nat) (hrow : row < m) (hcol : col < n) :
   ∃ (E : Matrix (Fin m) (Fin m) K),
     IsUnit E ∧
     matOf (clearPivotCol R row col hcol) = Matrix.mulᵣ E (matOf R) := by
   -- clearPivotCol = loop R ... 0
   dsimp [clearPivotCol]
   -- さっきのループ版補題を i = 0 で使う
-  simpa using matOf_clearPivotCol_loop R row col hcol 0
+  simpa using matOf_clearPivotCol_loop R row col hrow hcol 0
 
 lemma extendPivot_old
   {r n} (p : Fin r → Fin n) (newCol : Fin n)
@@ -6490,7 +6603,8 @@ lemma inv_step_some
       ∃ (E : Matrix (Fin m) (Fin m) K),
         IsUnit E ∧ matOf R₃ = E * st.M0 := by
       rcases h_fac_R₂ with ⟨E0, hE0_unit, hE0_mul⟩
-      rcases matOf_clearPivotCol R₂ st.rowCount st.colPtr hcol with
+
+      rcases matOf_clearPivotCol R₂ st.rowCount st.colPtr h_row_lt_m hcol with
         ⟨E1, hE1_unit, hE1_mul⟩
       -- matOf R₃ = E1 * matOf R₂ = E1 * (E0 * M0) = (E1 * E0) * M0
       refine ⟨E1 * E0, ?_, ?_⟩
