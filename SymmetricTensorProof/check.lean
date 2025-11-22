@@ -3100,7 +3100,8 @@ lemma findPivot_loop_correct
 
 
 lemma findPivot_exec_eq_spec
-  {m n K} [Field K] [DecidableEq K] (stP : GEStateP m n K) (hcol : stP.colPtr < n) :
+  {m n K} [Field K] [DecidableEq K]
+  (stP : GEStateP m n K) (hcol : stP.colPtr < n) :
   findPivot_exec (erase stP) hcol = findPivot_spec stP hcol := by
   -- erase しても R, rowCount, colPtr は同じなので simp で潰れる
   simp [findPivot_exec, erase, findPivot_loop_correct stP hcol]
@@ -3131,147 +3132,6 @@ lemma findPivot_exec_eq_none_iff
       (findPivot_spec_eq_none_iff stP hcol).2 h_no
     -- spec = none を exec = none に戻す
     simpa [hspec] using h_spec_none
-
-
--- lemma loop_none_iff
---   (stE : GEExecState m n K)
---   (hcol : stE.colPtr < n)
---   (i : Nat) :
---   loop stE hcol i = none
---     ↔ ¬ ∃ iF : Fin m, (stE.rowCount : Nat) ≤ iF ∧ (iF.val ≥ i) ∧
---         (matOf stE.R) iF ⟨stE.colPtr, hcol⟩ ≠ 0 := by
---         admit
-
-/- 非零な行である soundness -/
-lemma findPivot_exec_some_sound
-  {m n K} [Field K] [DecidableEq K]
-  {stE : GEExecState m n K} {j0 : Fin m}
-  (hcol : stE.colPtr < n)
-  (h : findPivot_exec stE hcol = some j0) :
-  (stE.rowCount : Nat) ≤ j0 ∧
-  (matOf stE.R) j0 ⟨stE.colPtr, hcol⟩ ≠ 0 := by
-  admit
-
-/- 非零な行のうち、最小のものを取ってくる -/
-lemma findPivot_exec_some_minimal
-  {m n K} [Field K] [DecidableEq K]
-  {stE : GEExecState m n K} {j0 : Fin m}
-  (hcol : stE.colPtr < n)
-  (h : findPivot_exec stE hcol = some j0) :
-  ∀ i : Fin m,
-    (stE.rowCount : Nat) ≤ i →
-    i.val < j0.val →
-    (matOf stE.R) i ⟨stE.colPtr, hcol⟩ = 0 := by
-  admit
-
-/- find pivot の理論版と実行版の橋渡し -/
-
-lemma findPivot_spec_vs_exec
-  {m n K} [Field K] [DecidableEq K]
-  (stP : GEStateP m n K)
-  (hcol : stP.colPtr < n) :
-  match findPivot_spec stP hcol, findPivot_exec (erase stP) hcol with
-  | none, none       => True
-  | some i0, some j0 => i0.val = j0.val
-  | _, _             => False := by
-  classical
-  -- 共通の「pivot が存在するか？」述語
-  let P : Prop := HasPivotPred stP hcol
-
-  -- spec 側の none 判定
-  have hNone_spec :
-    findPivot_spec stP hcol = none ↔ ¬ P :=
-    findPivot_spec_eq_none_iff stP hcol
-
-  -- exec 側の none 判定（これを別補題で証明しておく）
-  have hNone_exec :
-    findPivot_exec (erase stP) hcol = none ↔ ¬ P :=
-    findPivot_exec_eq_none_iff stP hcol
-
-  -- pivot の有無で大きく場合分け
-  by_cases hP : P
-  · -- case 1: pivot が存在する
-    -- → どちらも none ではないはず
-    have hSpec_not_none :
-      findPivot_spec stP hcol ≠ none := by
-      intro hnone
-      have : ¬ P := (hNone_spec.mp hnone)
-      exact this hP
-
-    have hExec_not_none :
-      findPivot_exec (erase stP) hcol ≠ none := by
-      intro hnone
-      have : ¬ P := (hNone_exec.mp hnone)
-      exact this hP
-
-    -- ここからは、両方とも some であることを使って
-    -- i0, j0 を取り出す
-    rcases hSpec : findPivot_spec stP hcol with _ | i0
-    · exact (hSpec_not_none hSpec).elim
-    rcases hExec : findPivot_exec (erase stP) hcol with _ | j0
-    · exact (hExec_not_none hExec).elim
-
-    -- ここまで来たら goal は `i0.val = j0.val`
-    -- soundness / minimality 補題を使う
-
-    -- spec 側: some i0 のときの性質（rowCount ≤ i0 ∧ 非零）
-    have hSpec_sound :=
-      findPivot_spec_some_sound
-        (st := stP) (i0 := i0) hcol hSpec
-
-    -- exec 側: some j0 のときの性質（rowCount ≤ j0 ∧ 非零）
-    have hExec_sound :=
-      findPivot_exec_some_sound
-        (stE := erase stP) (j0 := j0) hcol hExec
-
-    -- exec 側: some j0 のときの最小性
-    have hExec_min :=
-      findPivot_exec_some_minimal
-        (stE := erase stP) (j0 := j0) hcol hExec
-
-    -- spec 側: i0.val が P の Nat.find になっていること
-    have hSpec_idx :
-      ∃ hex : P, i0.val = Nat.find (exists_of_HasPivotPred_to_ExistsPivotIndexPred stP hcol hex)
-      := by
-        -- ここは「findPivot_spec は Nat.find を返している」ことを
-        -- formalize した補題を使うイメージ
-        admit
-
-    -- exec 側: j0.val が「rowCount 以上で最初に非零になる行」であること
-    -- から、Nat.find ≤ j0.val と j0.val ≤ Nat.find を示して
-    -- `Nat.le_antisymm` で等しいことを出す。
-    have h_le : i0.val ≤ j0.val := by
-      -- P の証人として「j0 が非零」という事実を使う → Nat.find ≤ j0.val
-      admit
-
-    have h_ge : j0.val ≤ i0.val := by
-      -- 「i0 より前は全部 0」という spec/exec 合わせ技で示す
-      admit
-    have h_eq : i0.val = j0.val :=
-      Nat.le_antisymm h_le h_ge
-
-    -- ここまで来れば、match の some/some ブランチのゴールを満たす：
-    --   i0.val = j0.val
-    -- それ以外の情報は要らないので、そのまま返す
-    simpa [hSpec, hExec, h_eq]
-
-  · -- case 2: pivot が存在しない → どちらも none のはず
-    have hNo : ¬ P := hP
-
-    have hSpec_none :
-      findPivot_spec stP hcol = none :=
-      (hNone_spec.mpr hNo)
-
-    have hExec_none :
-      findPivot_exec (erase stP) hcol = none :=
-      (hNone_exec.mpr hNo)
-
-    -- match 式を具体化してしまう
-    --   (none, none) のブランチだけ True,
-    --   それ以外のブランチは False
-    -- なので、このケースは True
-    -- `simp` に match の定義を噛ませれば OK
-    simp [hSpec_none, hExec_none]
 
 
 -- ==============================
@@ -7378,30 +7238,67 @@ def stepKernel
 
 /- -/
 lemma stepP_erases_to_kernel
-  {m n K} [Field K] (stP : GEStateP m n K) (hcol : stP.colPtr < n) :
+  {m n K} [Field K] [DecidableEq K] (stP : GEStateP m n K) (hcol : stP.colPtr < n)
+  (hnd : ¬ doneP stP) :
   erase (geStepP stP hcol) = stepKernel (erase stP) :=
 by
-  classical
-  -- doneP stP / ¬doneP stP で分けるか、
-  -- geStepP 側には doneP ガードがないなら pivot 分岐だけを見るか、設計次第
-  have hdoneP_or := (doneP_iff_rEqm_or_cEqn (st := stP))
-  -- 通常は geRunWF_P 内で ¬ doneP stP のときだけ geStepP を呼ぶので
-  -- lemma を「¬ doneP stP を仮定して…」の形で書いても OK
-  -- ここでは pivot の分岐に注目：
+  -- stepKernel の if 条件 (rowCount < m ∧ colPtr < n) を満たすことを確認
+  have h_cond : stP.rowCount < m ∧ stP.colPtr < n := by
+    -- ¬ doneP stP implies rowCount < m and colPtr < n
+    have h_not_done : ¬ (stP.rowCount = m ∨ stP.colPtr = n) := by
+      simpa [doneP_iff_rEqm_or_cEqn] using hnd
+    push_neg at h_not_done
+    -- We need to know rowCount <= m and colPtr <= n to derive < from !=
+    have h_bound := stP.inv.I1_bound
+    exact ⟨lt_of_le_of_ne h_bound.1 h_not_done.1, lt_of_le_of_ne h_bound.2 h_not_done.2⟩
+
+  -- pivot の分岐に注目：
   cases hspec : findPivot_spec stP hcol with
   | none =>
       have hExec : findPivot_exec (erase stP) hcol = none := by
         -- findPivot_spec_vs_exec から
-        sorry
-      -- now simp both sides
-      simp [geStepP, stepKernel, hspec, hExec, erase]  -- record equality になる
+        have h_vs := findPivot_exec_eq_spec stP hcol
+        simp [hspec] at h_vs
+        -- h_vs : match none, findPivot_exec ... with ...
+        -- findPivot_exec ... が some だと False になるので none でなければならない
+        cases h_ex : findPivot_exec (erase stP) hcol
+        · rfl
+        · simp [h_ex] at h_vs
+
+      -- 展開して比較
+      dsimp [erase] at hExec ⊢
+      unfold geStepP
+      split
+      · -- Case none matches hspec
+        unfold stepKernel
+        simp [hExec, h_cond]
+      · -- Case some contradicts hspec
+        next h_split =>
+          simp [hspec] at h_split
+
   | some i0 =>
       have hExec : findPivot_exec (erase stP) hcol = some i0 := by
         -- 同じく対応 lemma から
-        sorry
-      simp [geStepP, stepKernel, hspec, hExec, erase]
-      -- rSwap / rScale / extendPivot などが両側で同じ式になっているので
-      -- record 各フィールドごとに refl で潰れる
+        have h_vs := findPivot_exec_eq_spec stP hcol
+        simp [hspec] at h_vs
+        -- h_vs : match some i0, findPivot_exec ... with ...
+        cases h_ex : findPivot_exec (erase stP) hcol
+        · simp [h_ex] at h_vs
+        · simp [h_ex] at h_vs
+          congr
+
+      dsimp [erase] at hExec ⊢
+      unfold geStepP
+      split
+      · -- Case none contradicts hspec
+        next h_split =>
+          simp [hspec] at h_split
+      · -- Case some matches hspec
+        next i1 h_split =>
+          have h_eq : i1 = i0 := by rw [hspec] at h_split; cases h_split; rfl
+          subst h_eq
+          unfold stepKernel
+          simp [hExec, h_cond]
 
 
 /- pivot が見つかった場合、その i0 行が確かに非零 -/
@@ -7469,7 +7366,7 @@ lemma findPivot_spec_some_sound_new
 
 -- doneExecP なら stepKernel は恒等変換
 lemma stepKernel_doneExecP_id
-  {m n K} [Field K] {st : GEExecState m n K}
+  {m n K} [Field K] [DecidableEq K] {st : GEExecState m n K}
   (h : doneExecP st) :
   stepKernel st = st := by
   -- doneExecP の展開
@@ -7482,16 +7379,13 @@ lemma stepKernel_doneExecP_id
 
 -- 1. 1ステップで M0 は書き換えない（レコード更新が M0 に触れない）
 lemma geStepP_preserves_M0
-  {m n K} [Field K] (s : GEStateP m n K) (hcol : s.colPtr < n) :
+  {m n K} [Field K]
+  (s : GEStateP m n K) (hcol : s.colPtr < n) :
   (geStepP s hcol).M0 = s.M0 := by
   -- geStepP の定義を展開して record 更新部分を見る
   unfold geStepP
   -- どちらの分岐でも M0 はそのまま
-  cases h : findPivot_spec s hcol with
-  | none =>
-      simp
-  | some i0 =>
-      simp
+  split <;> simp
 
 -- 2. doneP でなければ colPtr < n
 lemma colPtr_lt_n_of_not_done
@@ -7509,20 +7403,18 @@ lemma colPtr_lt_n_of_not_done
 lemma geStepP_decreases_of_lt {m n K} [Field K]
   (s : GEStateP m n K) (hcn : s.colPtr < n) :
   μ (geStepP s hcn) < μ s := by
-  cases h : findPivot_spec s hcn with
-  | none =>
-      -- 目標: n - (s.colPtr + 1) < n - s.colPtr
-      simp [μ, geStepP, h]
-      exact Nat.sub_lt_sub_left hcn (Nat.lt_succ_self s.colPtr)
-  | some _ =>
-      simp [μ, geStepP, h]
-      exact Nat.sub_lt_sub_left hcn (Nat.lt_succ_self s.colPtr)
+  unfold geStepP
+  split
+  all_goals
+    simp [μ]
+    exact Nat.sub_lt_sub_left hcn (Nat.lt_succ_self s.colPtr)
 
 -- ==============================
 -- メインループ (well-founded)
 -- ==============================
 
-noncomputable def geRunWF_P {m n K} [Field K] : GEStateP m n K → GEStateP m n K
+noncomputable def geRunWF_P {m n K} [Field K]
+  : GEStateP m n K → GEStateP m n K
 | st =>
   by
     by_cases h : doneP st
@@ -7535,14 +7427,15 @@ decreasing_by
   have : μ (geStepP st hcn) < μ st := geStepP_decreases_of_lt (s:=st) hcn
   simpa [geRunWF_P, h] using this
 
-def geRunExec {m n K} [Field K] (fuel : Nat) (st : GEExecState m n K) : GEExecState m n K :=
+def geRunExec {m n K} [Field K] [DecidableEq K]
+  (fuel : Nat) (st : GEExecState m n K) : GEExecState m n K :=
   -- fuel 回 stepKernel を回す単純ループ（while相当）
   Nat.iterate stepKernel fuel st
 
 
 -- fuel が十分大きければ結果は変わらない、を示す補題
 lemma reach_final_with_enough_fuel
-  {m n K} [Field K]
+  {m n K} [Field K] [DecidableEq K]
   (st0 : GEExecState m n K)
   (fuel fuel' : Nat)
   (hge : fuel ≥ fuel')
@@ -7583,10 +7476,10 @@ lemma reach_final_with_enough_fuel
 
 -- 証明付きで実行した結果を消去しても、証明なしで実行した結果と一致する、を示す補題
 lemma run_erases_to_exec
-  {m n K} [Field K] (st : GEStateP m n K) :
+  {m n K} [Field K] [DecidableEq K]
+  (st : GEStateP m n K) :
   ∃ fuel ≤ μ_exec (erase st),
-    erase (geRunWF_P st) = geRunExec fuel (erase st) :=
-by
+    erase (geRunWF_P st) = geRunExec fuel (erase st) := by
   -- WF再帰の帰納法＋ stepP_erases_to_kernel を使って、
   -- 各ステップで erase が一致すること（bisim）を示す。
   have hmain :
@@ -7650,9 +7543,11 @@ by
                   = erase (geRunWF_P (geStepP st hcn)) := by rw [hWF]
                 _ = geRunExec fuel' (erase (geStepP st hcn)) := heq
                 _ = geRunExec fuel' (stepKernel (erase st)) := by
-                  rw [stepP_erases_to_kernel]
+                  apply congrArg
+                  exact stepP_erases_to_kernel st hcn hdone
                 _ = geRunExec (fuel' + 1) (erase st) := by
-                  simp [geRunExec, Nat.iterate]
+                  simp only [geRunExec]
+                  rw [Function.iterate_succ_apply]
             · -- μ (geStepP st) ≤ k を示す。
               exact hμ_st'
   -- 最後に hmain を st と μ st で適用
@@ -7971,7 +7866,8 @@ lemma doneP_geRunWF_P {m n K} [Field K] :
 
 -- 実行版：WF版と fuel' で一致しているとき、行列等式に書き換え
 lemma erase_final_mat_eq_exec
-  {m n K} [Field K] {st : GEStateP m n K}
+  {m n K} [Field K] [DecidableEq K]
+  {st : GEStateP m n K}
   {fuel' : Nat} {E : Matrix (Fin m) (Fin m) K}
   (hErase : erase (geRunWF_P st) = geRunExec fuel' (erase st))
   (hfac : matOf (geRunWF_P st).R = Matrix.mulᵣ E st.M0) :
@@ -8001,15 +7897,14 @@ lemma geRunWF_P_preserves_M0 {m n K} [Field K] :
 /- 〈最終形〉実行版 `geRunExec` の出力行列のランクは、入力行列 `M0` のランクと等しい。 -/
 /- rectifiedOfMatrix さえ正しい挙動をするなら正当性が担保される。 -/
 theorem geRunExec_rank_preserved
-  {m n K} [Field K]
+  {m n K} [Field K] [DecidableEq K]
   (M0 : Matrix (Fin m) (Fin n) K)
   (fuel : Nat) (hfuel : fuel ≥ n) :
   let R0   : Rectified m n K := rectifiedOfMatrix M0
   let st0E : GEExecState m n K :=
     { M0 := M0, R := R0, rowCount := 0, colPtr := 0, piv := (Fin.elim0) }
   let outE := geRunExec fuel st0E
-  Matrix.rank (matOf outE.R) = Matrix.rank M0 :=
-by
+  Matrix.rank (matOf outE.R) = Matrix.rank M0 := by
   intro R0 st0E outE
   classical
   -- 証明版の初期状態
@@ -8069,7 +7964,7 @@ by
   -- 最終結論
   simpa [this] using hrank'
 
-/- TODO: ここまで示す -/
+
 /-======================= ランク計算の実装（有限体版） =======================-/
 /- 𝔽p 上の厳密ガウス消去ランク（完全消去・行入替あり） -/
 def rankModP (A0 : Array (Array 𝔽p)) (m n : ℕ)
