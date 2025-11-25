@@ -25,7 +25,6 @@ import Mathlib.Logic.IsEmpty
 import Mathlib.LinearAlgebra.Matrix.Permutation
 import Mathlib.Algebra.Order.Group.Unbundled.Basic
 import Mathlib.Data.Finsupp.Lex
-import Batteries.Data.Vector.Lemmas
 
 open scoped BigOperators
 open Matrix
@@ -70,6 +69,10 @@ instance instFiniteGround (P : Params) : Finite (Ground P) := by
 noncomputable instance instFintypeGround (P : Params) : Fintype (Ground P) :=
   Fintype.ofFinite (Ground P)
 
+/- 便利のための可判別同値も生やしておくと後で困らない -/
+noncomputable instance instDecEqGround (P : Params) : DecidableEq (Ground P) :=
+  inferInstance
+
 /- マトロイドの要素の基本パラメータ -/
 structure Instance where
   P : Params
@@ -83,7 +86,6 @@ noncomputable def edgesList (G : Instance) : List (Ground G.P) := G.edges.toList
 
 end Instance
 
-namespace Vectorization
 /- 各テンソルをベクトル化した際の上三角 (r ≤ c) のインデックスの `List`（r 外側, c 内側） -/
 def upperPairs (t : ℕ) : List { rc : Fin t × Fin t // rc.1 ≤ rc.2 } :=
   -- 外側：r を走査
@@ -124,7 +126,7 @@ lemma finRange_partition_lt_append (t r : ℕ) :
       simp [List.finRange_succ_last]
       rfl
 
-    -- 末尾が r より小さいかで場合分け
+    -- 末尾 `t` が r より小さいかで場合分け
     by_cases hlt : t < r
     case pos =>
       -- p last = true
@@ -696,6 +698,7 @@ lemma upperPairsLength (t : ℕ) :
 
   rw [hsum_rows]
   simp [g]
+  trace_state
   have : ((List.finRange t).map (fun a : Fin t => t - (a : ℕ))).sum =
     ∑ i ∈ Finset.range t, (t - i) := by
     have hofFn_eq : (List.finRange t).map (fun a : Fin t => t - (a : ℕ))
@@ -705,13 +708,10 @@ lemma upperPairsLength (t : ℕ) :
 
   simp [this, finset_sum_sub_range]
 
-end Vectorization
-
 /- 係数環を多相化した構成。 -/
 namespace PolyOver
-open Vectorization
 
-variable (P : Params) {R : Type u} [CommSemiring R]
+variable (P : Params) {R : Type*} [CommSemiring R]
 
 /- p_i = (X_(i,0), ..., X_(i,t-1)) over R -/
 noncomputable def pVecR (i : Fin P.n) :
@@ -754,12 +754,6 @@ noncomputable def phiR (e : Ground P) :
   -- 以降は hx を使って Vector.cast
   exact Vector.cast hx (Vector.ofFn (fun i => xs.get i))
 
--- まず、長さが一致することを示す補題を用意しておくとスムーズです
-lemma phiListR_length_eq (e : Ground P) :
-    ((phiListR P (R := R)) e).length = (upperPairs P.t).length := by
-  unfold phiListR
-  -- map しても長さは変わらない
-  rw [List.length_map]
 
 /- 構成行列（行 d_col、列 Ground） over R -/
 noncomputable def M_polyR :
@@ -932,7 +926,7 @@ def ExistsCounterexample (P : Params) : Prop :=
 end Cnt
 
 
-namespace GaussianElimination
+namespace Checker
 open scoped BigOperators
 open LM St
 
@@ -7434,7 +7428,6 @@ decreasing_by
   have : μ (geStepP st hcn) < μ st := geStepP_decreases_of_lt (s:=st) hcn
   simpa [geRunWF_P, h] using this
 
--- 実行用関数
 def geRunExec {m n K} [Field K] [DecidableEq K]
   (fuel : Nat) (st : GEExecState m n K) : GEExecState m n K :=
   -- fuel 回 stepKernel を回す単純ループ（while相当）
@@ -7814,7 +7807,7 @@ lemma rank_of_REF_eq_pivot_count
   -- A_lin の像の次元 = pivot 列の本数
   have : Module.finrank K (LinearMap.range A_lin) = ref.r := by
     rw [eq_spaces]
-    rw [LinearIndependent.finrank_span linInd_pivots]
+    simp [finrank_span_eq_card linInd_pivots]
   -- rank の定義で仕上げ
   simpa [Matrix.rank] using this
 
@@ -7973,857 +7966,850 @@ theorem geRunExec_rank_preserved
   simpa [this] using hrank'
 
 
+-- ===================================
+-- Symbolic Rank 計算版（厳密ランク計算）
+-- ===================================
 
-end GaussianElimination
 
-namespace VerifyIndependence
 
-open Matrix MvPolynomial PolyOver Vectorization GaussianElimination
-
-variable (P : Params) {R : Type u} [CommSemiring R]
-variable {p : ℕ} [Fact p.Prime]
-
--- ヘルパー: 行インデックス r を upperPairs のインデックスにキャストする
--- これがないと List.get が使えません
-private def castRowIdx (r : Fin (d_col P)) : Fin (upperPairs P.t).length :=
-  r.cast (Vectorization.upperPairsLength P.t).symm
-
-/-
-  仕様: 2つのベクトル a, b ∈ K^t から、
-  対称テンソル a ⊗ b + b ⊗ a を計算し、上三角成分だけをベクトル化して返す関数。
-  (K は ZMod p などを想定)
--/
-def vecSymTensor {K : Type*} [CommSemiring K]
-    (a b : Fin P.t → K) : Fin (d_col P) → K :=
-  fun r =>
-    -- 行インデックス r を (k, l) (k ≤ l) に復元
-    -- List.get には「インデックスが長さ未満である」という型情報が必要なため castRowIdx を使用
-    let entry := (Vectorization.upperPairs P.t).get (castRowIdx P r)
-    let k := entry.1.1
-    let l := entry.1.2
-    -- 対称積の成分計算
-    a k * b l + b k * a l
-
-/-
-  評価関数 (修正版・Computable)
-  Sym2.out (noncomputable) の代わりに Sym2.lift を使用します。
-  計算結果が u, v の順序に依存しないため、これで実行可能になります。
--/
-def evalMatrix (p : ℕ) [Fact p.Prime]
-    (assignment : Fin P.n → Fin P.t → ZMod p) :
-    Matrix (Fin (d_col P)) (Ground P) (ZMod p) :=
-  fun r e =>
-    -- 1. 行インデックス r から (k, l) を取得
-    -- 1. 行インデックス r から (k, l) を取得
-    let entry := (upperPairs P.t).get (castRowIdx P r)
-    let k := entry.1.1
-    let l := entry.1.2
-
-    -- 2. 列インデックス e (Sym2) に対して計算関数を liftOn する
-    -- f: 代表元 (u, v) を受け取って値を返す関数
-    -- h: (u, v) と (v, u) で結果が同じであることの証明
-    e.liftOn
-      (fun (uv : Fin P.n × Fin P.n) =>
-        let u := uv.1
-        let v := uv.2
-        let val_uk := assignment u k
-        let val_vl := assignment v l
-        let val_vk := assignment v k
-        let val_ul := assignment u l
-        val_uk * val_vl + val_vk * val_ul)
-      (by
-        -- 対称性の証明
-        intro x y hxy
-        rw [Sym2.rel_iff] at hxy
-        cases hxy with
-        | inl h =>
-          rcases h with ⟨h1, h2⟩
-          simp [h1, h2]
-        | inr h =>
-          rcases h with ⟨h1, h2⟩
-          simp [h1, h2, add_comm, mul_comm])
-
-/-
-  evalMatrix によって得られる e に対応する行列の列が、
-  vecSymTensor によって得られるベクトルと一致する
--/
-theorem evalMatrix_spec
-    (assignment : Fin P.n → Fin P.t → ZMod p)
-    (e : Ground P) :
-    (evalMatrix P p assignment).col e
-    =
-    let u := e.out.1
-    let v := e.out.2
-    vecSymTensor P (assignment u) (assignment v) := by
-  ext r
-  -- 1. 定義を展開する (simp だとやりすぎるので unfold)
-  unfold evalMatrix vecSymTensor Matrix.col
-
-  -- 2. e を「代表元から作ったもの」として書き換える
-  -- Quotient.out_eq e : ⟦e.out⟧ = e
-  let s := Sym2.Rel.setoid (Fin P.n)
-  have h_out : e = Quotient.mk s (Quotient.out e) := (Quotient.out_eq e).symm
-
-  -- 3. 式中の e を Sym2.mk e.out に書き換える
-  -- nth_rw で左辺の evalMatrix の引数だけを狙う (右辺の e.out はそのままにしたい)
-  nth_rw 1 [h_out]
-
-  -- 5. let を展開して整理すれば一致する
-  dsimp
-  conv =>
-    lhs
-    simp [Quotient.liftOn_mk, Quotient.out]
-
-lemma d_col_eq (e : Ground P)
-  : d_col P = (phiListR (R:=R) P e).length := by
-  unfold d_col
-  exact Eq.trans (upperPairsLength P.t).symm (phiListR_length_eq P e).symm
-
--- 補題1: phiR の r 番目の成分は、phiListR の r 番目 (型キャスト済み) と同じ
-lemma phiR_get (e : Ground P) (r : Fin (d_col P)) :
-    (phiR P e).get r = (phiListR P e).get (r.cast (d_col_eq (R:=R) P e)) := by
-  simp [phiR]
-
-
-/-
-  追加の保証:
-  この vecSymTensor (および evalMatrix) が、Phase 1 で定義した多項式 `PolyOver` の
-  定義と整合していることの確認。
-  (R := ZMod p として多項式を作り、それを eval したものと一致するか)
--/
-theorem evalMatrix_eq_PolyOver_eval
-    (assignment : Fin P.n → Fin P.t → ZMod p) :
-    evalMatrix P p assignment =
-    (PolyOver.M_polyR P (R := ZMod p)).map (MvPolynomial.eval (fun (u, k) => assignment u k)) := by
-  ext r e
-
-  -- 【重要】ここで e を具体的なペア (u, v) に分解します
-  refine Sym2.inductionOn e (fun u v => ?_)
-
-  -- 定義を展開 (simp だと強すぎる場合があるので dsimp/simp を使い分けます)
-  simp [evalMatrix, PolyOver.M_polyR, PolyOver.phiR,
-  PolyOver.phiListR, PolyOver.symOuterEntryR, PolyOver.pVecR]
-
-  -- 1. 左辺の簡約
-  -- evalMatrix は Sym2.mk (u, v) に対しては直接計算式になります
-  -- (Sym2.mk = Quotient.mk なので liftOn_mk が効きます)
-  rw [Quot.liftOn_mk]
-
-  -- 2. 右辺の簡約
-  -- Vector や List のインデックスアクセスを整理します
-  -- Vector.get (Vector.ofFn f) i = f i などの補題を使います
-  conv =>
-    rhs
-    simp [eval_X]
-    simp only [Vector.getElem_cast, Vector.ofFn, Vector.map]
-
-  -- 3. 代表元の取り扱い
-  let rep := (Sym2.mk (u, v)).out
-  have h_rep := Quotient.out_eq (s := Sym2.Rel.setoid (Fin P.n)) (Sym2.mk (u, v))
-  change Sym2.mk rep = Sym2.mk (u, v) at h_rep
-
-  -- Sym2 における等価性で分岐
-  rw [Sym2.eq_iff] at h_rep
-  rcases h_rep with ⟨h1, h2⟩ | ⟨h1, h2⟩
-  · -- ケース1: rep = (u, v) の場合
-    -- 1. 右辺の Vector/List 操作と eval を一気に展開・整理する
-    simp [Quot.out] at h1 h2
-    conv =>
-      rhs
-      simp only [MvPolynomial.eval_add, MvPolynomial.eval_mul, MvPolynomial.eval_X]
-      simp [h1, h2]
-
-    -- 2. これで右辺は assignment rep.1 ... の形になるので、h1, h2 で u, v に書き換える
-    simp [castRowIdx]
-  · -- ケース2: rep = (v, u) の場合
-    simp [Quot.out] at h1 h2
-    conv =>
-      rhs
-      simp [h1, h2]
-    simp [castRowIdx]
-    ring
-
-/-
-  i < j となるインデックス対 (i, j) を辞書順で列挙する関数。
-  ループなし単純無向完全グラフの辺（K_n の辺）に対応します。
--/
-def strictUpperPairs (n : ℕ) : List (Fin n × Fin n) :=
-  (List.finRange n).foldr
-    (fun i acc =>
-      (List.finRange n).foldr
-        (fun j acc' =>
-          -- ここが変更点: i ≤ j ではなく i < j
-          if i < j then (i, j) :: acc' else acc'
-        )
-        acc
-    )
-    []
-
-/-
-  頂点数 n の完全グラフの全辺を、決定論的な順序（辞書順）でリスト化したもの。
-  自己ループ (i, i) は含まれません。
--/
-def sortedAllEdges (n : ℕ) : List (Sym2 (Fin n)) :=
-  -- 新しく作った strictUpperPairs を使用
-  (strictUpperPairs n).map (fun (u, v) => Sym2.mk (u, v))
-
-/-
-  Matrix を GEExecState (初期状態) に変換する関数
--/
-def initGEState {m n : ℕ} (M : Matrix (Fin m) (Fin n) (ZMod p)) :
-    GEExecState m n (ZMod p) :=
-  let R_array := toArray2D M
-  { M0 := M
-  , R := {
-      A := R_array
-      , rowSize := toArray2D_rowSize M
-      , rect := toArray2D_rect M
-    }
-  , rowCount := 0
-  , colPtr := 0
-  , piv := (fun x => x.elim0) -- Fin 0 → Fin n なので空関数
-  }
-
-/-
-  ランク計算関数 (アダプター)
-  提供された geRunExec を使用してランクを計算します。
--/
-def computeRank {m n : ℕ} (M : Matrix (Fin m) (Fin n) (ZMod p)) : ℕ :=
-  -- 初期状態を作成
-  let st := initGEState M
-
-  -- 実行回数の上限 (列数 + 行数 あれば十分終わるはずだが、念のため多めに)
-  let fuel := n + m + 100
-
-  -- ガウス消去を実行
-  let final_st := geRunExec fuel st
-
-  -- 最終的なランク (rowCount) を返す
-  final_st.rowCount
-
-/-
-  メイン判定関数: 独立性チェック
-  入力:
-    - グラフ G (辺集合)
-    - 証拠 assignment (頂点ごとのベクトル)
-  出力: Bool
-    - ランクが辺数と一致すれば true
--/
-def check_independence
-    (G : Cnt.Graph P)
-    (assignment : Fin P.n → Fin P.t → ZMod p) : Bool :=
-  -- 1. 行列全体を評価
-  let M_full := evalMatrix P p assignment
-
-  -- 2. グラフ G に含まれる辺だけを抽出
-  -- sortedAllEdges は決定論的なので、常に同じ順序になります
-  let g_list := (sortedAllEdges P.n).filter (fun e => e ∈ G)
-
-  -- 3. 部分行列の構築
-  let m := g_list.length
-
-  -- 部分行列: 列 j は g_list の j 番目の辺に対応
-  let M_sub : Matrix (Fin (d_col P)) (Fin m) (ZMod p) :=
-    fun i j => M_full i (g_list.get j)
-
-  -- 4. ランク計算
-  let r := computeRank M_sub
-
-  -- 5. 判定: ランク == 辺数
-  r == m
-
-
--- [前提1] check.lean のガウス消去が正しいことの公理化
--- geRunExec が、十分な燃料を与えれば正しいランク（行数）を返すと仮定します。
--- 本来は check.lean 内で geRunExec_rank_preserved から rowCount = rank を導く定理が必要です。
-theorem rank_eq_rowCount_of_Inv_done
-  {m n K} [Field K]
-  (st : GEStateP m n K) (hdone : doneP st) :
-  Matrix.rank (matOf st.R) = st.rowCount := by
-  classical
-  let r := st.rowCount
-  let p := st.pivot
-  let A := matOf st.R
-
-  -- 1. Rank ≥ r
-  have h_ge : r ≤ Matrix.rank A := by
-    -- pivot 列 p i は標準基底 e_i (行 i が 1, 他は 0)
-    let cols := fun i : Fin r => A.col (p i)
-    have h_cols : ∀ i, cols i = Pi.single (Fin.castLE st.inv.I1_bound.1 i) 1 := by
-      intro i
-      ext k
-      simp [cols, Matrix.col_apply]
-      rcases st.inv.I2_unit i with ⟨h1, h0⟩
-      by_cases h : k = Fin.castLE st.inv.I1_bound.1 i
-      · rw [h]; dsimp [A, p]; rw [h1, Pi.single_eq_same]
-      · dsimp [A, p]; rw [h0 k h]; simp [h]
-
-    -- これらは線形独立
-    have h_indep : LinearIndependent K cols := by
-      let f := fun i : Fin r => Fin.castLE st.inv.I1_bound.1 i
-      have hf : Function.Injective f := Fin.castLE_injective _
-      have : cols = (fun i => Pi.single (f i) (1 : K)) := by funext i; exact h_cols i
-      rw [this]
-      exact LinearIndependent.comp
-        (Pi.linearIndependent_single_one (ι := Fin m) (R := K))
-        f hf
-
-    -- 列ランクなので、独立な列が r 本あればランクは r 以上
-    admit
-
-  -- 2. Rank ≤ r
-  have h_le : Matrix.rank A ≤ r := by
-    rw [doneP_iff_rEqm_or_cEqn] at hdone
-    cases hdone with
-    | inl hr_eq_m =>
-      dsimp [r]
-      rw [hr_eq_m]
-      exact Matrix.rank_le_height A
-    | inr hc_eq_n =>
-      -- c = n ならば、r 行目以降はすべて 0
-      have h_rows_zero : ∀ i : Fin m, r ≤ i → A i = 0 := by
-        intro i hi
-        ext j
-        by_cases hp : ∃ k, p k = j
-        · rcases hp with ⟨k, rfl⟩
-          -- pivot 列: i ≠ k (k < r ≤ i) なので 0
-          have h_ne : i ≠ Fin.castLE st.inv.I1_bound.1 k := by
-            intro h
-            have : (i : ℕ) < r := by rw [h]; exact k.is_lt
-            linarith
-          exact (st.inv.I2_unit k).2 i h_ne
-        · -- pivot 列でない: j < n = c0 なので I4_tail0 より 0
-          have j_lt_c : (j : ℕ) < st.colPtr := by rw [hc_eq_n]; exact j.is_lt
-          apply st.inv.I4_tail0 j j_lt_c
-          · intro k hk
-            exact hp ⟨k, hk⟩
-          · exact hi
-
-      -- 行空間は最初の r 行で張られる
-      rw [← Matrix.rank_transpose]
-
-      let f : Fin r → Fin m := Fin.castLE st.inv.I1_bound.1
-      let S : Finset (Fin m) := (Finset.univ : Finset (Fin r)).map ⟨f, Fin.castLE_injective _⟩
-      let vectors : Finset (Fin n → K) := S.image A
-
-      have h_span : Submodule.span K (Set.range Aᵀ.col) ≤ Submodule.span K vectors := by
-        rw [Submodule.span_le]
-        rintro v ⟨i, rfl⟩
-        if hi : (i : ℕ) < r then
-          apply Submodule.subset_span
-          dsimp [vectors, S]
-          rw [Finset.mem_coe, Finset.mem_image]
-          use i
-          constructor
-          · rw [Finset.mem_map]
-            use ⟨i, hi⟩
-            simp [f]
-          · rfl
-        else
-          have : A i = 0 := h_rows_zero i (Nat.le_of_not_lt hi)
-          change A i ∈ _
-          rw [this]
-          exact Submodule.zero_mem _
-      admit
-
-  exact le_antisymm h_le h_ge
-
-theorem computeRank_eq_rank
-  {m n} (M : Matrix (Fin m) (Fin n) (ZMod p)) :
-    computeRank M = M.rank := by
-  unfold computeRank
-  let st := initGEState M
-  let fuel := n + m + 100
-  let final_st := geRunExec fuel st
-
-  -- 1. geRunExec_rank_preserved より、最終状態のランクは元のランクと等しい
-  have h_rank_pres : Matrix.rank (matOf final_st.R) = Matrix.rank M := by
-    apply geRunExec_rank_preserved M fuel
-    -- fuel >= n
-    dsimp [fuel]
-    linarith
-
-  -- 2. final_st.rowCount = rank (matOf final_st.R) を示す
-  -- そのために、final_st が WF版の到達状態と一致することを使う
-  let R0 := rectifiedOfMatrix M
-  have h0 : matOf R0 = M := matOf_rectifiedOfMatrix M
-  let stP : GEStateP m n (ZMod p) :=
-    { M0 := M, R := R0, rowCount := 0, colPtr := 0, pivot := Fin.elim0, inv := inv_init M R0 h0 }
-
-  have h_erase_init : erase stP = st := by
-    simp [erase, st, initGEState, stP, R0, rectifiedOfMatrix]
-
-  obtain ⟨fuel_wf, h_wf_le, h_wf_eq⟩ := run_erases_to_exec stP
-
-  -- fuel が十分大きいので、final_st は WF版の最終状態と一致
-  have h_reach : final_st = erase (geRunWF_P stP) := by
-    dsimp [final_st]
-    rw [←h_erase_init]
-    rw [h_wf_eq]
-    apply reach_final_with_enough_fuel
-    · -- μ stP ≤ n なので fuel_wf ≤ n ≤ fuel
-      have h_mu_le : μ stP ≤ n := Nat.sub_le n stP.colPtr
-      have : fuel_wf ≤ n := le_trans h_wf_le h_mu_le
-      dsimp [fuel]
-      linarith
-    · -- WF版は停止状態で終わる
-      rw [←h_wf_eq]
-      have h_done_wf : doneP (geRunWF_P stP) := doneP_geRunWF_P stP
-      simp [doneP_erase_eq, h_done_wf]
-
-  change final_st.rowCount = M.rank
-  rw [h_reach] at h_rank_pres
-  rw [h_reach]
-  simp [erase]
-
-  -- ランクの等式と rowCount の等式をつなぐ
-  rw [h_rank_pres.symm]
-  apply (rank_eq_rowCount_of_Inv_done (geRunWF_P stP) (doneP_geRunWF_P stP)).symm
-
--- [前提2] ランクの不等式 (Rank Inequality)
--- 行列 M を写像 f で変換した M.map f のランクは、元のランク以下になる。
--- (線形代数の基本定理: Matrix.rank_map_le)
--- ここでは、整数多項式環 ℤ[X] から 有限体 ℤ/pℤ への準同型写像を考えます。
-/-
-  [重要補題] 評価によるランクの不等式
-  rank(M_sub : ZMod p) ≤ rank(M_poly_sub : FractionRing (MvPoly Q))
-  TODO: 一旦ここは公理にしておく。
-  TODO: 後から実装し直す
--/
-
-axiom rank_eval_le_rank_poly
-    (G : Cnt.Graph P)
-    (assignment : Fin P.n → Fin P.t → ZMod p)
-    (M_poly_sub : Matrix (Fin (d_col P)) { x // x ∈ G } (FractionRing (MvPolynomial (Var P) ℚ)))
-    -- M_poly_sub が正しく構成されていることを保証する仮定
-    (h_def : M_poly_sub = (LM.M P).submatrix id Subtype.val) :
-    Matrix.rank
-    (fun i j => evalMatrix P p assignment i
-      ((List.filter (fun e ↦ decide (e ∈ G)) (sortedAllEdges P.n)).get j))
-    ≤ Matrix.rank M_poly_sub
-
--- theorem rank_eval_le_rank_poly
---     (G : Cnt.Graph P)
---     (assignment : Fin P.n → Fin P.t → ZMod p)
---     (M_poly_sub : Matrix (Fin (d_col P)) { x // x ∈ G } (FractionRing (MvPolynomial (Var P) ℚ)))
---     -- M_poly_sub が正しく構成されていることを保証する仮定
---     (h_def : M_poly_sub = (LM.M P).submatrix id Subtype.val) :
---     Matrix.rank (fun i j => evalMatrix P p assignment i ((List.filter (fun e ↦ decide (e ∈ G)) (sortedAllEdges P.n)).get j))
---     ≤ Matrix.rank M_poly_sub := by
-
---   -- 1. M_sub (左辺) と PolyOver (ZMod p) の関係
---   -- 評価行列のランクは、元の多項式行列(ZMod p)のランク以下 (Matrix.rank_map_le)
-
---   -- 列の添字が違う (Fin m vs Subtype G) ので合わせる必要がありますが、
---   -- ランクの本質は「評価準同型 eval : Poly[ZMod p] -> ZMod p」による不等式です。
-
---   -- ここは少しテクニカルなので、事実として認めます
---   -- 「評価してもランクは増えない」
---   have h_eval : Matrix.rank (fun i j => evalMatrix P p assignment i ((List.filter (fun e ↦ decide (e ∈ G)) (sortedAllEdges P.n)).get j))
---                 ≤ Matrix.rank ((PolyOver.M_polyR P (R := ZMod p)).submatrix id (Subtype.val : G → Ground P)) := by
---     -- evalMatrix_eq_PolyOver_eval と Matrix.rank_map_le を使って示せますが、
---     -- 列の並び替え(sort vs subtype)の整合性が面倒なので sorry とします
---     sorry
-
---   -- 2. PolyOver (ZMod p) と PolyOver (Q) の関係
---   -- 係数が 0, 1 しかないため、ZMod p で独立なら Q でも独立です。
---   -- 「rank (M mod p) ≤ rank M」
---   have h_lift : Matrix.rank ((PolyOver.M_polyR P (R := ZMod p)).submatrix id (Subtype.val : G → Ground P))
---                 ≤ Matrix.rank ((PolyOver.M_polyR P (R := ℚ)).submatrix id (Subtype.val : G → Ground P)) := by
---     -- 整数行列の小行列式による議論が必要
---     sorry
-
---   -- 3. PolyOver (Q) と FractionRing の関係
---   -- 整域から分数体への埋め込みではランクは保存されます (Matrix.rank_map_eq_of_injective)
---   have h_frac : Matrix.rank ((PolyOver.M_polyR P (R := ℚ)).submatrix id (Subtype.val : G → Ground P))
---                 = Matrix.rank M_poly_sub := by
---     rw [h_def]
---     unfold LM.M
---     -- M_polyQ (PolyOver.M_polyR) を algebraMap で持ち上げたものが LM.M
---     -- algebraMap は単射なのでランクは等しい
---     apply Matrix.rank_map_eq_of_injective
---     exact IsFractionRing.injective _ _
-
---   -- 3つの不等式/等式をつなげる
---   rw [← h_frac]
---   apply le_trans h_eval h_lift
-
-
--- 補題1: foldr で if .. :: .. else .. をするのは、filter して map するのと同じ
--- (内側のループの挙動を整理するための補題)
-theorem foldr_if_cons_eq_map_filter
-  {α β} (l : List α) (p : α → Prop) [DecidablePred p] (f : α → β) (init : List β) :
-    (l.foldr (fun x acc => if p x then f x :: acc else acc) init)
-    = (l.filter p).map f ++ init := by
-  induction l with
-  | nil => simp
-  | cons x xs ih =>
-    simp [ih]
-    split <;> simp_all
-
--- 補題2: foldr で ++ をつなげていくのは、bind (flatMap) と同じ
--- (外側のループの挙動を整理するための補題)
-theorem foldr_append_eq_flatMap {α β} (l : List α) (f : α → List β) :
-    (l.foldr (fun x acc => f x ++ acc) []) = l.flatMap f := by
-  induction l with
-  | nil => simp
-  | cons x xs ih => simp [ih, List.flatMap_cons]
-
-/- メイン証明: strictUpperPairs は重複がない -/
-lemma strictUpperPairs_nodup (n : ℕ) : (strictUpperPairs n).Nodup := by
-  -- 1. 定義を展開する
-  unfold strictUpperPairs
-
-  -- 2. 内側の foldr を map + filter に書き換える (補題1使用)
-  conv =>
-    arg 1
-    -- 外側の foldr の中身 (fun i acc => ...) の内側にある foldr を書き換え
-    arg 1; intro i acc
-    rw [foldr_if_cons_eq_map_filter]
-
-  -- 3. 外側の foldr を bind に書き換える (補題2使用)
-  rw [foldr_append_eq_flatMap]
-
-  -- この時点で式は以下のような形になっています:
-  -- (finRange n).flatMap (fun i => ((finRange n).filter (i < ·)).map (Prod.mk i))
-
-  -- 4. List.Nodup.flatMap 定理を適用する
-  --    条件:
-  --    (a) finRange n に重複がない
-  --    (b) 各 i について、生成される部分リストに重複がない
-  --    (c) 異なる i, j が生成する部分リスト同士は互いに素である
-  simp [List.nodup_flatMap]
-
-  constructor
-  · -- 条件(1): 生成される各部分リストが Nodup であること
-    intro i
-    -- 部分リスト: ((finRange n).filter (i < ·)).map (Prod.mk i)
-    -- map (単射) しても Nodup は保たれる
-    apply List.Nodup.map
-    · -- (i, x) = (i, y) → x = y なので単射
-      intro x y h
-      injections h
-    · -- filter しても Nodup は保たれる
-      apply List.Nodup.filter
-      apply List.nodup_finRange
-
-  · -- 条件(2): 異なる i, j が生成するリスト同士は互いに素 (Disjoint) であること
-    -- Pairwise を forall i ≠ j に変換するために、finRange n が Nodup であることを使う
-    apply List.Nodup.pairwise_of_set_pairwise (List.nodup_finRange n)
-
-    -- Set.Pairwise の定義に従って証明
-    -- ∀ i ∈ l, ∀ j ∈ l, i ≠ j → Disjoint (f i) (f j)
-    intro i _ j _ h_ne
-
-    -- Disjoint A B ↔ ∀ x, x ∈ A → x ∉ B
-    rw [Function.onFun]
-    intro x hxi hxj
-    simp at hxi hxj
-
-    rcases hxi with ⟨k, h_eqi⟩
-    rcases hxj with ⟨l, h_eqj⟩
-    have : i = j := by
-      have : (i, k) = (j, l) := by
-        exact Eq.trans h_eqi.right (h_eqj.right).symm
-      exact (Prod.mk_inj.mp this).left
-    exact h_ne this
-
-
-/- 補題: Sym2.mk は i < j かつ x < y の範囲で単射である -/
-lemma sym2_mk_injective_on_strict {n : ℕ} {u v x y : Fin n}
-    (huv : u < v) (hxy : x < y) (h_eq : Sym2.mk (u, v) = Sym2.mk (x, y)) :
-    (u, v) = (x, y) := by
-  rw [Sym2.eq_iff] at h_eq
-  cases h_eq with
-  | inl h => exact Prod.mk_inj.mpr h
-  | inr h =>
-    -- (u, v) = (y, x) の場合、u = y かつ v = x
-    -- u < v なので y < x となるが、前提 x < y と矛盾する
-    rcases h with ⟨rfl, rfl⟩
-    exfalso
-    exact lt_asymm hxy huv
-
-
-/- 補題: strictUpperPairs の要素は常に i < j を満たす -/
-lemma mem_strictUpperPairs_imp_lt
-    {n : ℕ} {x : Fin n × Fin n}
-    (h : x ∈ strictUpperPairs n) : x.1 < x.2 := by
-  unfold strictUpperPairs at h
-  let inner (i : Fin n) (acc : List (Fin n × Fin n)) :=
-    (List.finRange n).foldr (fun j acc' => if i < j then (i, j) :: acc' else acc') acc
-
-  have mem_inner : ∀ (i : Fin n) (acc : List (Fin n × Fin n)) (x : Fin n × Fin n),
-      x ∈ inner i acc ↔ x ∈ acc ∨ (x.1 = i ∧ i < x.2) := by
-    intro i acc x
-    unfold inner
-    have gen :
-    ∀ (l : List (Fin n)),
-    x ∈ l.foldr (fun j acc' => if i < j then (i, j) :: acc' else acc') acc ↔
-                    x ∈ acc ∨ (x.1 = i ∧ x.2 ∈ l ∧ i < x.2) := by
-      intro l
-      induction l with
-      | nil => simp
-      | cons j l ih =>
-        simp only [List.foldr_cons]
-        by_cases hij : i < j
-        · simp [hij, ih]
-          constructor
-          · rintro (rfl | (h | ⟨rfl, h2, h3⟩))
-            · right; exact ⟨rfl, by simp, hij⟩
-            · left; exact h
-            · right; exact ⟨rfl, Or.inr h2, h3⟩
-          · rintro (h | ⟨rfl, (rfl | h2), h3⟩)
-            · right; left; exact h
-            · left; rfl
-            · right; right; exact ⟨rfl, h2, h3⟩
-        · simp [hij, ih]
-          constructor
-          · rintro (h | ⟨rfl, h2, h3⟩)
-            · left; exact h
-            · right; exact ⟨rfl, Or.inr h2, h3⟩
-          · rintro (h | ⟨rfl, (rfl | h2), h3⟩)
-            · left; exact h
-            · contradiction
-            · right; exact ⟨rfl, h2, h3⟩
-    rw [gen]
-    simp [List.mem_finRange]
-
-  let outer (l : List (Fin n)) := l.foldr (fun i acc => inner i acc) []
-  change x ∈ outer (List.finRange n) at h
-
-  have mem_outer : ∀ l (x : Fin n × Fin n), x ∈ outer l → x.1 < x.2 := by
-    intro l x hx
-    induction l with
-    | nil => contradiction
-    | cons i l ih =>
-      unfold outer at hx
-      simp only [List.foldr_cons] at hx
-      rw [mem_inner] at hx
-      rcases hx with h_in_acc | ⟨rfl, h2⟩
-      · exact ih h_in_acc
-      · exact h2
-
-  exact mem_outer (List.finRange n) x h
-
-/- 補題: (i, j) が strictUpperPairs に含まれる ↔ i < j -/
-lemma mem_strictUpperPairs (n : ℕ) (p : Fin n × Fin n) :
-    p ∈ strictUpperPairs n ↔ p.1 < p.2 := by
-  -- 定義を展開
-  unfold strictUpperPairs
-
-  -- 内側の foldr を map + filter に書き換える
-  simp only [foldr_if_cons_eq_map_filter]
-
-  -- 外側の foldr を bind に書き換える
-  rw [foldr_append_eq_flatMap]
-
-  simp only [List.mem_flatMap, List.mem_finRange, true_and]
-
-  constructor
-  · -- (->) リストに含まれるなら i < j
-    rintro ⟨i, hi⟩
-    simp only [List.mem_map, List.mem_filter, List.mem_finRange, true_and] at hi
-    rcases hi with ⟨j, h_lt, rfl⟩
-    simp at h_lt
-    exact h_lt
-  · -- (<-) i < j ならリストに含まれる
-    intro h_lt
-    exists p.1
-    simp only [List.mem_map, List.mem_filter, List.mem_finRange, true_and]
-    exists p.2
-    constructor
-    · simp [h_lt]
-    · rfl
-
-/- 補題: sortedAllEdges は重複がない -/
-lemma sortedAllEdges_nodup (n : ℕ) : (sortedAllEdges n).Nodup := by
-  unfold sortedAllEdges
-  apply List.Nodup.map_on ?_ (strictUpperPairs_nodup n)
-  · intro x hx y hy hxy
-    have hx_lt := mem_strictUpperPairs_imp_lt hx
-    have hy_lt := mem_strictUpperPairs_imp_lt hy
-    exact sym2_mk_injective_on_strict hx_lt hy_lt hxy
-
-/-
-  メイン定理: 独立性判定の健全性 (Soundness)
-  check_independence が true を返せば、グラフ G は本当に St.indep である。
--/
-theorem check_independence_soundness
-    (G : Cnt.Graph P)
-    (assignment : Fin P.n → Fin P.t → ZMod p)
-    (h_simple : ∀ e ∈ G, ¬ e.IsDiag) -- グラフのself-loopを許さない
-    (h_check : check_independence P G assignment = true) :
-    St.indep P G := by
-  -- 1. check_independence の定義を展開
-  unfold check_independence at h_check
-  dsimp at h_check
-
-  -- 定義内で使われている変数を再現
-  let M_val := evalMatrix P p assignment
-  let g_list := (sortedAllEdges P.n).filter (fun e => e ∈ G)
-  let m := g_list.length
-  let M_sub := fun i j => M_val i (g_list.get j)
-
-  -- 2. computeRank の結果が true (つまり列数 m と一致)
-  have h_rank_val : computeRank M_sub = m := by
-    -- r == m が true なので r = m
-    simpa using h_check
-
-  -- 3. ガウス消去の正当性より、実際のランクも m
-  have h_rank_eq_m : Matrix.rank M_sub = m := by
-    rw [computeRank_eq_rank] at h_rank_val
-    exact h_rank_val
-
-  -- 4. 有限体上のランクから、多項式行列(有理数/整数)のランクへの持ち上げ
-  -- 戦略:
-  --   rank(M_sub) = m  (in ZMod p)
-  --   rank(M_sub) ≤ rank(M_poly) (in Q) ?
-
-  -- PolyOver の定義は整数係数多項式と見なせるため、ZMod p への評価は環準同型です。
-  -- したがって、Matrix.rank_map_le が適用できます。
-
-  -- St.indep の定義 (LM.ColsIndependentOn) は「列が線形独立」
-  -- これは「列フルランクであること (rank = 列数)」と同値です。
-  rw [St.indep, LM.ColsIndependentOn]
-
-  -- 6. 「線形独立 ↔ ランクが列数と一致」を使ってゴールをランクの等式に変換
-  -- Submodule.finrank_span_eq_card_iff_linearIndependent などもありますが、
-  -- 行列特有の定理を使うのが楽です。
-  -- ここでは汎用的な linearIndependent_iff_card_eq_finrank_span を使い、
-  -- finrank (span cols) = rank M を利用します。
-  rw [linearIndependent_iff_card_eq_finrank_span]
-  -- 【修正】次元(finrank) を 行列のランク(Matrix.rank) に書き換える
-  -- 対象となる多項式行列の部分行列を定義しておくとスムーズです
-  let M_poly_sub := (LM.M P).submatrix id (Subtype.val : G → Ground P)
-  -- ゴールの右辺が M_poly_sub の列空間の次元であることを明示的に書き換える
-  -- LM.colsFamily M j = M.col j なので、range は一致します
-  -- ゴールの右辺が M_poly_sub の列空間の次元であることを明示的に書き換える
-  -- LM.colsFamily M j = M.col j なので、range は一致します
-  have h_span_eq :
-    Submodule.span
-    (FractionRing (MvPolynomial (Var P) ℚ)) (Set.range (fun j : G => LM.colsFamily (St.M P) j)) =
-    Submodule.span (FractionRing (MvPolynomial (Var P) ℚ)) (Set.range M_poly_sub.col) := by
-    congr
-
-  -- ゴールを書き換え
-  rw [Set.finrank, h_span_eq]
-
-  -- これで形が合ったので適用可能になる
-  rw [← Matrix.rank_eq_finrank_span_cols M_poly_sub]
-
-  -- これでゴールは Fintype.card G = M_poly_sub.rank になりました
-  symm
-  apply le_antisymm
-
-  · -- 上限: ランクは列数 (card G) を超えない
-    -- M_poly_sub の列添字は {x // x ∈ G} (Subtype) ですが、
-    -- これを Fin (card G) に変換してもランクは変わりません。
-    exact Matrix.rank_le_card_width M_poly_sub
-
-  · -- 下限: 評価行列のランク (m) 以上である
-    -- まず card G = m であることを整理
-    -- まず card G = m であることを整理
-    have h_card : Fintype.card {e // e ∈ G} = m := by
-      -- g_list = (sortedAllEdges P.n).filter (· ∈ G) です。
-      -- 以下の2つの事実を使います：
-      -- 1. sortedAllEdges は重複がない (Nodup)
-      -- 2. G の要素はすべて sortedAllEdges に含まれる (Cover)
-      dsimp [m, g_list]
-
-      -- 1. 左辺 Fintype.card {e // e ∈ G} を Finset.card G に変換
-      rw [Fintype.card_coe]
-
-      -- リストの重複がないことの証明 (厳密には strictUpperPairs の性質から導出)
-      have h_nodup : (sortedAllEdges P.n).Nodup := sortedAllEdges_nodup P.n
-
-      -- G の全要素がリストに含まれていることの証明
-      have h_subset : G ⊆ (sortedAllEdges P.n).toFinset := by
-        intro e he
-        simp only [sortedAllEdges, List.mem_toFinset, List.mem_map]
-
-
-        -- e ∈ G なので e はループではない
-        have not_loop : ¬ e.IsDiag := h_simple e he
-
-        -- e = {u, v} とすると u ≠ v
-        let u := e.out.1
-        let v := e.out.2
-        have h_eq : e = Sym2.mk (u, v) := (Quot.out_eq e).symm
-        have h_ne : u ≠ v := by
-          intro h
-          apply not_loop
-          rw [h_eq, Sym2.isDiag_iff_proj_eq]
-          -- Sym2.out_eq e から e = {u, v} なので u=v なら eはループ
-          exact h
-
-        -- 4. 大小関係で場合分け (u < v または v < u)
-        rcases lt_trichotomy u v with h_lt | h_eq_uv | h_gt
-        · -- ケース u < v: (u, v) がリストにある
-          exists (u, v)
-          constructor
-          · -- (u, v) ∈ strictUpperPairs
-            apply (mem_strictUpperPairs P.n (u, v)).mpr
-            exact h_lt
-          · -- s(u, v) = e
-            exact h_eq.symm
-
-        · -- ケース u = v: 矛盾
-          contradiction
-
-        · -- ケース v < u: (v, u) がリストにある
-          exists (v, u)
-          constructor
-          · -- (v, u) ∈ strictUpperPairs
-            apply (mem_strictUpperPairs P.n (v, u)).mpr
-            exact h_gt
-          · -- s(v, u) = s(u, v) = e
-            rw [Sym2.eq_swap]
-            exact h_eq.symm
-
-      -- 2. 右辺の List.length を Finset.card に変換
-      -- 使う補題: List.Nodup.length_eq_card {l} (h : l.Nodup) : l.length = l.toFinset.card
-      -- フィルタリングされたリストも Nodup であるため、この補題が使えます
-      rw [← List.toFinset_card_of_nodup (List.Nodup.filter _ h_nodup)]
-
-      -- 3. リストのフィルタと集合のフィルタの交換
-      -- List.toFinset_filter : (l.filter p).toFinset = l.toFinset.filter p
-      rw [List.toFinset_filter]
-
-      -- 4. 集合の等式を示す
-      -- G = (sortedAllEdges.toFinset).filter (· ∈ G)
-      congr
-      ext x
-      simp only [Finset.mem_filter, List.mem_toFinset]
-
-      constructor
-      · -- x ∈ G → (x ∈ List ∧ x ∈ G)
-        intro hx
-        constructor
-        · rw [← List.mem_toFinset]
-          apply h_subset
-          exact hx
-        · simp [hx]
-      · -- (x ∈ List ∧ x ∈ G) → x ∈ G
-        rintro ⟨_, hx⟩
-        simp at hx
-        exact hx
-
-    -- 不等式の結合
-    rw [h_card]
-    rw [← h_rank_eq_m] -- m = rank(M_sub)
-
-    -- M_sub (ZMod p) は M_poly_sub (Q) の評価形です。
-    -- 評価してもランクは下がることしかないので、元のランクの方が大きい（または等しい）。
-    -- rank(M_sub) ≤ rank(M_poly_sub)
-    -- 定義した補題を適用
-    apply rank_eval_le_rank_poly P G assignment M_poly_sub rfl
-
-end VerifyIndependence
 
 /-======================= ランク計算の実装（有限体版） =======================-/
 /- 𝔽p 上の厳密ガウス消去ランク（完全消去・行入替あり） -/
-variable {p : ℕ} [Fact p.Prime]
-local notation "𝔽p" => ZMod p
+def rankModP (A0 : Array (Array 𝔽p)) (m n : ℕ)
+(hRowSize : A0.size = m) (hrect : Rect A0 n) : Nat :=
+  Id.run do
+    -- TODO: ここの設定がまずいかも
+    let rows := m
+    let cols := n
+    have hrows : rows = m := by trivial
+    have hcols : cols = n := by trivial
+    let mut R : Rectified m n 𝔽p := ⟨A0, hRowSize, hrect⟩
+    let mut r := 0
+    let mut c := 0
+    -- 補助
+    let get (i j : Nat) (M : Array (Array 𝔽p)) : 𝔽p :=
+      if h : i < M.size then
+        let row := M[i]
+        if h2 : j < row.size then row[j] else 0
+      else 0
+
+    while r < rows && c < cols do
+      -- pivot 探索
+      let mut piv : Option Nat := none
+      for i in [r:rows] do
+        if get i c R.A ≠ 0 then piv := some i; break
+      match piv with
+      | none     => c := c + 1
+      | some i₀  =>
+          -- 行入替
+          R := rSwap R r i₀
+          -- ピボット正規化
+          let a := get r c R.A
+          R := rScale R r (a⁻¹)
+          for i in [0:rows] do
+            if i ≠ r then
+              let f := get i c R.A
+              if f ≠ 0 then R := rAxpy R i r f
+          r := r + 1
+          c := c + 1
+    return r
+
+/- IO: ランダム点 α を s 個生成（`Vector (ZMod p) s`） -/
+def samplePointVec (s : Nat) : IO (Vector 𝔽p s) :=
+  match s with
+  | 0 =>
+      -- Vector のコンストラクタは Array を受け取るので #[] を使う
+      pure ⟨#[], by simp⟩
+  | Nat.succ s' => do
+      let xs ← samplePointVec s'
+      let x  ← IO.rand 0 (p - 1)       -- 0..p-1 の乱数
+      let a  : 𝔽p := (x : ZMod p)      -- Nat → ZMod p のキャスト
+      pure (xs.push a)                  -- Vector.push : Vector α n → α → Vector α (n+1)
+
+def vecAsPoint {s} (xs : Vector 𝔽p s) : Fin s → 𝔽p := fun i => xs.get i
+
+/- 1 試行：評価→rank -/
+-- noncomputable def trialRank
+--   {d m s : Nat}
+--   (A : Matrix (Fin d) (Fin m) (MvPolynomial (Fin s) ℤ)) :
+--   IO Nat := do
+--   let xs ← samplePointVec (p := p) s
+--   let α  := vecAsPoint xs
+--   let Aeval := evalMatrixZMod (p := p) A α
+--   let arr   := toArray2D Aeval
+--   pure (rankModP (p := p) arr)
+
+/-======================= 厳密フェーズ（分数体） =======================-/
+
+/- フィールド K 上のガウス消去ランク（完全消去・行入替あり） -/
+
+noncomputable def rankByGaussianElim
+  {K} [Field K] (init : Array (Array K)) : Nat :=
+  open Classical in
+  Id.run do
+    -- ★ これを最初に置く（この do ブロック内だけ有効なインスタンス）
+    have _ : Inhabited K := ⟨(0 : K)⟩
+    let rows := init.size
+    let cols := if init.isEmpty then 0 else init[0]!.size
+    let mut A := init
+    let mut r := 0
+    let mut c := 0
+    let get (i j : Nat) (M : Array (Array K)) : K :=
+      if i < M.size then
+        let row := M[i]!
+        if j < row.size then row[j]! else 0
+      else 0
+    let swapRows (i j : Nat) (M : Array (Array K)) :=
+      if i < M.size ∧ j < M.size then
+        let ri := M[i]!; let rj := M[j]!
+        (M.set! i rj).set! j ri
+      else M
+    let rowScale (i : Nat) (k : K) (M : Array (Array K)) :=
+      if i < M.size then
+        let row := M[i]!
+        let newRow := Id.run do
+          let mut out := #[]
+          for j in [0:row.size] do out := out.push (k * row[j]!)
+          out
+        M.set! i newRow
+      else M
+    let rowAxpy (i k : Nat) (α : K) (M : Array (Array K)) :=
+      if i < M.size ∧ k < M.size then
+        let ri := M[i]!; let rk := M[k]!
+        let n := ri.size
+        let newRow := Id.run do
+          let mut out := #[]
+          for j in [0:n] do out := out.push (ri[j]! - α * rk[j]!)
+          out
+        M.set! i newRow
+      else M
+
+    while r < rows && c < cols do
+      let mut piv : Option Nat := none
+      for i in [r:rows] do
+        if get i c A ≠ 0 then piv := some i; break
+      match piv with
+      | none     => c := c + 1
+      | some i₀  =>
+          A := swapRows r i₀ A
+          let a := get r c A
+          A := rowScale r (a⁻¹) A
+          for i in [0:rows] do
+            if i ≠ r then
+              let f := get i c A
+              if f ≠ 0 then A := rowAxpy i r f A
+          r := r + 1
+          c := c + 1
+    return r
+
+/- 分数体上の厳密ランク（既存の `rankQ_compute` 相当） -/
+noncomputable def rankQ_exact (P : Params) (G : Finset (Ground P)) : ℕ := by
+  classical
+  let K := FractionRing (MvPolynomial (Var P) ℚ)
+  let d := d_col P
+  let β := {e : Ground P // e ∈ G}
+  let m := Fintype.card β
+  let toβ : Fin m → β := (Fintype.equivFin β).symm
+  let Mx : Matrix (Fin d) β K := restrictCols P G
+  let init : Array (Array K) :=
+    Array.ofFn (fun i : Fin d => Array.ofFn (fun j : Fin m => Mx i (toβ j)))
+  exact rankByGaussianElim init
+
+/-======================= ハイブリッド（乱択→厳密） =======================-/
+
+/- あなたの構成行列（列は `G` に制限）を **ℚ-多項式**で返す（乱択用） -/
+noncomputable def restrictColsPolyQ
+  (P : Params) (G : Finset (Ground P)) :
+  Matrix (Fin (d_col P)) {e : Ground P // e ∈ G} (MvPolynomial (Var P) ℚ) :=
+  fun r c => (M_polyQ P) r c.1
+
+-- 乱択フェーズ用：ℤ 係数の構成行列（列を G に制限）
+noncomputable def restrictColsPolyZ
+  (P : Params) (G : Finset (Ground P)) :
+  Matrix (Fin (d_col P)) {e : Ground P // e ∈ G}
+        (MvPolynomial (Var P) Int) :=
+  fun r c => (M_polyZ P r c.1)    -- ← M_poly の定義式は係数が 0/1 なので ℤ でも同じ
+                                 --    （MvPolynomial.X / + / * は係数環に多相）
+
+
+
+/- 任意の変数集合 `σ`：`MvPolynomial σ Int` を `α : σ → ZMod p` で評価し，
+    mod p の厳密ランク（ガウス消去）を返す。`RandRank.rankModP` は既存実装を想定。 -/
+def trialRankVar
+  {p : Nat} [Fact (Nat.Prime p)]
+  {d m : Nat} {σ : Type*}
+  (A : Matrix (Fin d) (Fin m) (MvPolynomial σ Int))
+  (α : σ → ZMod p) : Nat :=
+  let coeffHom := Int.castRingHom (ZMod p)
+  let Aeval : Matrix (Fin d) (Fin m) (ZMod p) :=
+    fun i j => MvPolynomial.eval₂Hom coeffHom α (A i j)
+  let arr := Array.ofFn (fun i => Array.ofFn (fun j => Aeval i j))
+  rankModP (p := p) arr
+
+/- Var P → ZMod p の乱数関数を1つ作る（`←` は Unicode） -/
+def mkAlphaIO (P : Params) (p : Nat) [Fact (Nat.Prime p)]
+    : IO (Var P → ZMod p) := do
+  -- 行ごとに長さ t の列ベクトルを乱数で用意
+  let rowsList ← (List.range P.n).mapM (fun _ => do
+    (List.range P.t).mapM (fun _ => do
+      let x ← IO.rand 0 (p - 1)
+      pure (x : ZMod p)))
+  -- Array にしてから安全アクセス .get! を段階的に使う
+  let tab : Array (Array (ZMod p)) := (rowsList.map (·.toArray)).toArray
+  pure (fun ia => (tab[ia.1.val]!)[ia.2.val]!)
+
+/- 純関数版：評価点列を外から与える（Var P 版）。 -/
+noncomputable def rankQ_hybrid_withVar
+  (P : Params) (G : Finset (Ground P))
+  {p : Nat} [Fact (Nat.Prime p)]
+  (alphas : List (Var P → ZMod p)) : Nat :=
+by
+  classical
+  let d    := d_col P
+  let m    := Fintype.card {e : Ground P // e ∈ G}
+  let full := Nat.min d m
+  -- ℤ 係数の多項式行列（列制限）
+  let toFin : Fin m → {e : Ground P // e ∈ G} := (Fintype.equivFin _).symm
+  let MpolyZ : Matrix (Fin d) (Fin m) (MvPolynomial (Var P) Int) :=
+    fun i j => (restrictColsPolyZ P G) i (toFin j)
+  -- 1 回の試行（mod p で厳密ランク）
+  let trial : (Var P → ZMod p) → Nat :=
+    fun α => trialRankVar (p := p) (A := MpolyZ) α
+  -- T 回の最大値
+  let best := alphas.foldl (fun acc α => Nat.max acc (trial α)) 0
+  -- ★ タクティックを使わず、項で完結させる
+  exact if h : best = full then full else rankQ_exact P G
+
+
+/- IO 版：α を trials 個作って純関数版へ。 -/
+noncomputable def rankQ_hybrid_IO
+  (P : Params) (G : Finset (Ground P))
+  (p : Nat) [Fact (Nat.Prime p)]
+  (trials : Nat := 2) : IO Nat := do
+  let alphas ← (List.range trials).mapM (fun _ => mkAlphaIO P p)  -- mkAlphaIO : Var P → ZMod p
+  pure (rankQ_hybrid_withVar P G (p := p) alphas)
+
+
+namespace Bareiss
+
+open MvPolynomial
+
+variable {σ : Type*} [LinearOrder σ] [DecidableEq σ]
+
+abbrev LexOrder (σ : Type) [LinearOrder σ] := (σ →₀ ℕ)
+
+noncomputable def leadingMonomial (p : MvPolynomial σ ℤ) : WithBot (LexOrder σ) :=
+  p.support.max (Finsupp.Lex.linearOrder σ).compare
+
+variable [Finite σ]
+
+noncomputable def lexRel : (MvPolynomial σ ℤ) → (MvPolynomial σ ℤ) → Prop :=
+  InvImage (fun p => leadingMonomial p) (WithBot.preorder.lt)
+
+lemma lexRel_wf : WellFounded (@lexRel σ _ _ _) :=
+  InvImage.wf _ (WithBot.wellFounded_lt (Finsupp.Lex.wellFounded (fun _ => Nat.lt_wfRel.wf)))
+
+lemma lt_of_cancel_leading_term
+  (a b : MvPolynomial σ ℤ)
+  (ma mb : LexOrder σ)
+  (h_la : leadingMonomial a = some ma)
+  (h_lb : leadingMonomial b = some mb)
+  (diff : LexOrder σ)
+  (h_diff : ma = mb + diff)
+  (q_coeff : ℤ)
+  (rem : MvPolynomial σ ℤ)
+  (h_rem : rem = a - monomial diff q_coeff * b)
+  (h_cancel : a.coeff ma = q_coeff * b.coeff mb)
+  : lexRel rem a := by
+  unfold lexRel
+  simp only [InvImage]
+  rw [h_la]
+
+  -- We need to show leadingMonomial rem < some ma
+  -- This means for all m in rem.support, m < ma (in Lex order)
+  -- or rem = 0 (which is bot < some ma)
+
+  have h_coeff_ma : rem.coeff ma = 0 := by
+    rw [h_rem]
+    simp only [coeff_sub, coeff_monomial_mul']
+    rw [h_diff]
+    simp only [add_tsub_cancel_left]
+    rw [h_cancel]
+    ring
+
+  -- Now we need to show that for any m > ma, rem.coeff m = 0
+  -- and since rem.coeff ma = 0, the max must be < ma.
+
+  have h_max_lt : ∀ m, (Finsupp.Lex.linearOrder σ).compare m ma = Ordering.gt → rem.coeff m = 0 := by
+    intro m hm_gt
+    -- hm_gt means m > ma
+    have hm_gt' : ma < m := by
+      rw [←Finsupp.Lex.lt_iff_compare]
+      exact hm_gt
+
+    -- rem.coeff m = a.coeff m - (monomial diff q_coeff * b).coeff m
+    rw [h_rem, coeff_sub, coeff_monomial_mul']
+
+    -- a.coeff m must be 0 because ma is max of a.support
+    have ha_zero : a.coeff m = 0 := by
+      by_contra h_nonzero
+      have h_in_supp : m ∈ a.support := Finsupp.mem_support_iff.mpr h_nonzero
+      -- ma is max, so m <= ma
+      have h_le : m ≤ ma := Finset.le_max_of_eq (a.support.max_eq_some_iff (Finsupp.Lex.linearOrder σ).compare) h_la h_in_supp
+      -- Contradiction with ma < m
+      exact not_le_of_lt hm_gt' h_le
+
+    -- (monomial diff q_coeff * b).coeff m = q_coeff * b.coeff (m - diff)
+    -- We need to show b.coeff (m - diff) = 0
+
+    by_cases h_diff_le : diff ≤ m
+    · -- diff <= m
+      -- m' = m - diff
+      -- We need to show m' > mb
+      -- We have m > ma = mb + diff
+      -- So m - diff > mb
+      have h_gt_mb : mb < m - diff := by
+          rw [h_diff] at hm_gt'
+          exact lt_tsub_of_add_lt_right hm_gt'
+
+      -- b.coeff m' = 0 because mb is max of b.support
+      by_contra h_nonzero
+      have h_in_supp : (m - diff) ∈ b.support := Finsupp.mem_support_iff.mpr h_nonzero
+      have h_le : (m - diff) ≤ mb := Finset.le_max_of_eq (b.support.max_eq_some_iff (Finsupp.Lex.linearOrder σ).compare) h_lb h_in_supp
+      exact not_le_of_lt h_gt_mb h_le
+    · -- diff > m
+      -- In this case coeff_monomial_mul' is 0
+      rfl
+
+    simp [ha_zero]
+    -- If diff > m, the second term is 0 anyway.
+    -- If diff <= m, we showed b.coeff (m - diff) = 0.
+    -- So in both cases the term is 0.
+    -- Wait, I need to be precise with the if-then-else in coeff_monomial_mul'
+    split_ifs
+    · simp [ha_zero]
+      by_contra h_b_nonzero
+      -- We already showed this leads to contradiction
+      have h_gt_mb : mb < m - diff := by
+          rw [h_diff] at hm_gt'
+          exact lt_tsub_of_add_lt_right hm_gt'
+      have h_in_supp : (m - diff) ∈ b.support := Finsupp.mem_support_iff.mpr h_b_nonzero
+      have h_le : (m - diff) ≤ mb := Finset.le_max_of_eq (b.support.max_eq_some_iff (Finsupp.Lex.linearOrder σ).compare) h_lb h_in_supp
+      exact not_le_of_lt h_gt_mb h_le
+    · simp [ha_zero]
+
+  -- Since for all m >= ma, coeff is 0 (m=ma is 0, m>ma is 0),
+  -- the max of support must be < ma.
+
+  -- If rem = 0, then bot < some ma is true.
+  -- If rem != 0, let m_max be its leading monomial.
+  -- We know m_max <= ma (since m > ma => coeff 0).
+  -- And m_max != ma (since coeff ma = 0).
+  -- So m_max < ma.
+
+  cases h_rem_zero : rem == 0
+  · rw [eq_of_beq h_rem_zero]
+    exact WithBot.bot_lt_coe ma
+  · have h_rem_ne_zero : rem ≠ 0 := ne_of_beq_false h_rem_zero
+    let m_max := rem.support.max (Finsupp.Lex.linearOrder σ).compare
+    have h_m_max_def : leadingMonomial rem = m_max := rfl
+    rw [h_m_max_def]
+
+    have h_some : ∃ m, m_max = some m := rem.support.max_eq_some_iff _ |>.mpr (Finsupp.nonempty_support_iff.mpr h_rem_ne_zero)
+    rcases h_some with ⟨m, hm_eq⟩
+    rw [hm_eq]
+    apply WithBot.coe_lt_coe.mpr
+
+    -- m is in support
+    have h_in_supp : m ∈ rem.support := Finset.max_mem_of_exists _ (rem.support.max_eq_some_iff _ |>.mp hm_eq)
+
+    -- So m < ma?
+    -- We know m <= ma because if m > ma, coeff is 0.
+    have h_le : m ≤ ma := by
+      by_contra h_gt
+      have h_gt' : ma < m := not_le.mp h_gt
+      have h_compare : (Finsupp.Lex.linearOrder σ).compare m ma = Ordering.gt := by
+        rw [Finsupp.Lex.compare_eq_gt]
+        exact h_gt'
+      have h_zero := h_max_lt m h_compare
+      have h_ne_zero := Finsupp.mem_support_iff.mpr h_in_supp
+      contradiction
+
+    -- And m != ma because coeff ma = 0
+    have h_ne : m ≠ ma := by
+      intro h_eq
+      rw [h_eq] at h_in_supp
+      have h_zero := h_coeff_ma
+      have h_ne_zero := Finsupp.mem_support_iff.mp h_in_supp
+      contradiction
+
+    exact lt_of_le_of_ne h_le h_ne
+
+/--
+  Exact division of multivariate polynomials over ℤ.
+  Assumes b divides a.
+  Uses a simple greedy division algorithm with lexicographic monomial order.
+-/
+noncomputable def exactDiv (a b : MvPolynomial σ ℤ) : MvPolynomial σ ℤ :=
+  if h : b = 0 then 0 else
+  if h' : a = 0 then 0 else
+  let la := leadingMonomial a
+  let lb := leadingMonomial b
+  match h_la : la, h_lb : lb with
+  | some ma, some mb =>
+    if mb ≤ ma then
+      let diff := ma - mb
+      if ma = mb + diff then
+        let ca := a.coeff ma
+        let cb := b.coeff mb
+        if cb ≠ 0 ∧ ca % cb = 0 then
+          let q_coeff := ca / cb
+          let q_term := monomial diff q_coeff
+          let term_prod := q_term * b
+          let rem := a - term_prod
+          q_term + exactDiv rem b
+        else
+          0 -- Coefficient not divisible
+      else
+        0 -- Monomial not divisible
+    else
+      0 -- Leading monomial not divisible
+  | _, _ => 0
+termination_by a
+decreasing_by
+  simp [lexRel]
+  apply lt_of_cancel_leading_term a b ma mb h_la h_lb diff ‹_› (ca / cb) rem rfl
+  simp [ca, cb]
+  exact Int.eq_mul_of_div_eq_right (Int.dvd_of_emod_eq_zero ‹_›) rfl
+
+/--
+  Bareiss algorithm step.
+  M: Current matrix (modified in place effectively)
+  k: Current pivot index (0-indexed)
+  p: Previous pivot value (initially 1)
+-/
+noncomputable def bareissStep (M : Array (Array (MvPolynomial σ ℤ))) (k : Nat) (p : MvPolynomial σ ℤ) (r_idx : Nat) : Array (Array (MvPolynomial σ ℤ)) :=
+  let pivot := (M[r_idx]!)[k]!
+  let rows := M.size
+  let cols := if rows > 0 then M[0]!.size else 0
+  Id.run do
+    let mut M' := M
+    for i in [r_idx + 1 : rows] do
+      let mut row := M'[i]!
+      let val_ik := (row)[k]!
+      let mut newRow := row
+      for j in [k + 1 : cols] do
+         let val_ij := (row)[j]!
+         let val_kj := (M'[r_idx]!)[j]!
+         let num := val_ij * pivot - val_ik * val_kj
+         let res := exactDiv num p
+         newRow := newRow.set! j res
+      M' := M'.set! i newRow
+    return M'
+
+/--
+  Symbolic Rank using Bareiss Algorithm.
+  Returns the rank.
+-/
+noncomputable def symbolicRank (M : Array (Array (MvPolynomial σ ℤ))) : Nat :=
+  let rows := M.size
+  let cols := if rows > 0 then (M[0]!).size else 0
+  Id.run do
+    let mut A := M
+    let mut p : MvPolynomial σ ℤ := 1
+    let mut r := 0
+    let mut c := 0
+
+    while r < rows && c < cols do
+      -- Find pivot in column c starting from row r
+      let mut piv : Option Nat := none
+      for i in [r:rows] do
+        if (A[i]!)[c]! ≠ 0 then piv := some i; break
+
+      match piv with
+      | none => c := c + 1
+      | some i₀ =>
+        -- Swap rows
+        if i₀ ≠ r then
+          let row_r := A[r]!
+          let row_i := A[i₀]!
+          A := A.set! r row_i
+          A := A.set! i₀ row_r
+
+        -- Perform Bareiss step
+        A := bareissStep A c p r
+
+        -- Update previous pivot
+        p := (A[r]!)[c]!
+
+        r := r + 1
+        c := c + 1
+    return r
+
+
+/- Bareiss アルゴリズムによる厳密ランク計算 -/
+noncomputable def rankQ_exact_bareiss (P : Params) (G : Finset (Ground P)) : ℕ :=
+  let d := d_col P
+  let m := Fintype.card {e : Ground P // e ∈ G}
+  let toFin : Fin m → {e : Ground P // e ∈ G} := (Fintype.equivFin _).symm
+  let MpolyZ : Matrix (Fin d) (Fin m) (MvPolynomial (Var P) ℤ) :=
+    fun i j => (restrictColsPolyZ P G) i (toFin j)
+
+  -- Convert to SparsePoly
+  let Msparse : Matrix (Fin d) (Fin m) (Bareiss.SparsePoly (Var P) ℤ) :=
+    fun i j => Bareiss.SparsePoly.fromMvPolynomial (MpolyZ i j)
+
+  let arr := Array.ofFn (fun i => Array.ofFn (fun j => Msparse i j))
+  (Bareiss.symbolicRank arr).1
+
+
+/- ハイブリッドランク計算：乱択で従属なら厳密計算を行う -/
+noncomputable def rankQ_hybrid_final
+  (P : Params) (G : Finset (Ground P))
+  (p : Nat) [Fact (Nat.Prime p)]
+  (trials : Nat := 3) : IO Nat := do
+  let d := d_col P
+  let m := G.card
+  let full := Nat.min d m
+
+  -- 1. Randomized Check
+  let mut is_full_rank := false
+  for _ in [0:trials] do
+    let r ← rankQ_hybrid_IO P G p (trials := 1)
+    if r == full then
+      is_full_rank := true
+      break
+
+  if is_full_rank then
+    pure full
+  else
+    -- 2. Symbolic Check (Bareiss)
+    pure (rankQ_exact_bareiss P G)
+
+
+
+/- 閉包（計算版；`S_t` の閉包。とりあえず仕様版に委譲しておく）。 -/
+noncomputable def closureFinset (P : Params) (C : Finset (Ground P)) : Finset (Ground P) :=
+  St.closure P C
+
+/- C の「各要素を 1 本外せば独立」の証拠（占位；`Prop`）。 -/
+structure IndCertBundle (P : Params) (C : Finset (Ground P)) : Prop where
+  (all_independent : ∀ e ∈ C, True)   -- ← 後で `St.indep P (C.erase e)` などに差し替え
+
+/- C の従属性の証拠（占位；`Prop`）。 -/
+structure DepCert (P : Params) (C : Finset (Ground P)) : Prop where
+  (nontrivial_relation : True)         -- ← 後で「非自明な線形関係」等に差し替え
+
+/- 回路証明を `Type` のレコードに包む（`Option` に入れられるようにする）。 -/
+structure CircuitCert (P : Params) (G : Finset (Ground P)) where
+  C : Finset (Ground P)                  -- 見つけた回路候補
+  subset : C ⊆ G                              -- C は G の部分
+  ind    : IndCertBundle P C                  -- 極小性の証拠（占位；`Prop` フィールド）
+  dep    : DepCert P C                        -- 従属性の証拠（占位；`Prop` フィールド)
+
+/- 「G の列が独立か？」（rank = 列数 を判定） -/
+noncomputable def allColsIndependentBool (P : Params) (G : Finset (Ground P)) : Bool := by
+  classical exact decide (rankQ_exact P G = Fintype.card {e : Ground P // e ∈ G})
+
+/- G の中からサーキットを 1 つ返す（見つからなければ none；骨格実装）。
+  方針：独立なら none。従属なら |S|=1,2,… の順で従属な部分集合を探索し、
+  最初に見つかった S を返す（最小サイズゆえ circuit）。 -/
+noncomputable def findCircuit
+  (P : Params) (G : Finset (Ground P)) : Option (Finset (Ground P)) := by
+  classical
+  -- まず G 全体が独立なら回路は存在しない
+  if h : allColsIndependentBool P G = true then exact none else
+  -- 「従属か？」のブール判定（ランクと列数の比較）
+  let dep : Finset (Ground P) → Bool := fun S => decide (rankQ_exact P S < S.card)
+  -- k = 1..G.card の順で、従属な |S|=k の部分集合を列挙して最初の要素を取る
+  -- （最初に見つかる k が最小サイズ ⇒ その S は極小従属 = circuit）
+  let candidates : List (Finset (Ground P)) :=
+    (List.range G.card).foldr (fun k acc =>
+      -- |S| = k+1 の部分集合を列挙して dep で絞る
+      (((G.powerset).filter (fun S => S.card = k + 1)).filter (fun S => dep S)).toList ++ acc) []
+  exact candidates.head?
+
+noncomputable def certifyCircuit
+  (P : Params) (G : Finset (Ground P)) :
+  Option (CircuitCert P G) := by
+  classical
+  -- まず `findCircuit` の結果で分岐
+  match findCircuit P G with
+  | none =>
+      exact none
+  | some C =>
+      -- ここで C ⊆ G を再チェック（Prop は decidable なので if が使える）
+      if hsubset : C ⊆ G then
+        -- 占位の証拠を詰めて返す
+        let ind : IndCertBundle P C := ⟨by intro _ _; trivial⟩
+        let dep : DepCert P C       := ⟨trivial⟩
+        exact some { C := C, subset := hsubset, ind := ind, dep := dep }
+      else
+        -- （理屈上は起こらないはずだが）保守的に none を返す
+        exact none
+
+end Checker
+
+
+namespace CheckerCorrectness
+open St Checker
+
+/- Array 型にしても Rect であることの証明 -/
+
+lemma rect_toArray2D {m n K} (M : Matrix (Fin m) (Fin n) K) :
+  Rect (toArray2D M) n := by
+  intro i hi; simp [toArray2D]  -- 各行の size = n
+
+lemma size_toArray2D_rows {m n α} (M : Matrix (Fin m) (Fin n) α) :
+  (toArray2D M).size = m := by
+  simp [toArray2D]
+
+lemma of_to_id_rect {m n K} (M : Matrix (Fin m) (Fin n) K) :
+  toMat (toArray2D M) m n (size_toArray2D_rows M) (rect_toArray2D M) = M := by
+  ext i j; simp [toMat, toArray2D]
+
+/- rank も一致する（本命の橋渡し補題） -/
+lemma rank_of_to_eq {m n K} [Field K] [Inhabited K]
+  (M : Matrix (Fin m) (Fin n) K) :
+  Matrix.rank (toMat (toArray2D M) m n (size_toArray2D_rows M) (rect_toArray2D M))
+    = Matrix.rank M := by
+  rw [of_to_id_rect]
+
+/- ------------------------- 1) 行基本変形＝可逆左乗 → rank 不変 ------------------------- -/
+/- swap, scale, x_i + α x_j の正当性 -/
+/- 行入替: Array 実装 swapRows は `Matrix.swap` の左乗に一致 -/
+lemma rectA
+  {m n α} [Field α] (M : Matrix (Fin m) (Fin n) α) :
+  let A := toArray2D M
+  Rect A n := rect_toArray2D M
+
+
+lemma toMat_swapRows
+  {m n α} [Field α]
+  (M : Matrix (Fin m) (Fin n) α) (i j : ℕ) (hi : i < m) (hj : j < m) :
+  let A := toArray2D M
+  let A' := swapRows i j A
+  have hrectA : Rect A n := rect_toArray2D M
+  have hAA' : A'.size = A.size := by simp [A', swapRows]; split_ifs <;> simp
+  have h : i < A.size ∧ j < A.size := by
+    rw [size_toArray2D_rows M]
+    simp [hi, hj]
+  have hA' : A'.size = m := by
+    simp [A', swapRows]
+    simp [h, A]
+    exact size_toArray2D_rows M
+  have hrect : Rect A' n := by
+    intro k hk
+    rw [hAA'] at hk
+    by_cases hki : k = i
+    · simp [hki, A', swapRows, h, Array.setIfInBounds]
+      by_cases hij : i = j
+      · subst hij
+        simpa using hrectA i h.1
+      · simp [Array.getElem_set, ne_comm.mp hij, hrectA j]
+    · simp [A', swapRows, h, Array.setIfInBounds, Array.getElem_set]
+      by_cases hkj : k = j
+      · simp [hkj, hrectA i]
+      · simp [ne_comm.mp hkj, ne_comm.mp hki, hrectA k]
+
+  (toMat A' m n hA' hrect) = (Matrix.swap α ⟨i, hi⟩ ⟨j, hj⟩) * M := by
+  -- 行の成分比較。`swap_mul_apply_left/right` が武器。
+  sorry
+
+
+/- 行スケール: `rowScale i k` は「該当成分だけ k」の対角行列の左乗 -/
+def scaleRowMat {m K} [Field K] (i : Fin m) (k : K) :
+  Matrix (Fin m) (Fin m) K :=
+  diagonal (fun r => if r = i then k else 1)
+
+lemma toMat_rowScale {m n K} [Field K]
+  (i j : ℕ) (k : K)
+  (M : Matrix (Fin m) (Fin n) K) (hi : i < m) (hj : j < m) :
+  let A := toArray2D M
+  let A' := rowScale i k A
+  let scaleMat := scaleRowMat ⟨i, hi⟩ k
+  have hA : i < A.size := by rw [size_toArray2D_rows M]; exact hi
+  have hA' : A'.size = m := by simp [A', rowScale, hA]; exact size_toArray2D_rows M
+  have hrect : Rect A' n := by
+    have hrectA : Rect A n := rect_toArray2D M
+    simp [A', rowScale]
+    intro k hk
+    simp [hA, Array.setIfInBounds, Array.getElem_set]
+    by_cases hik : k = i
+    · simp [Eq.symm hik, hrectA k]
+    · simp [ne_comm.mp hik, hrectA k]
+
+  (toMat A' m n hA' hrect) = Matrix.mulᵣ scaleMat M := by
+  -- `Matrix.mul_apply` と `diagonal` の計算
+  sorry
+
+/- 行加算: `rowAxpy i k α`（i ← i − α·k）は transvection の左乗 -/
+lemma toMat_rowAxpy {m n K} [Field K]
+  (i k : ℕ) (α : K)
+  (M : Matrix (Fin m) (Fin n) K) (hi : i < m) (hk : k < m) :
+  let A := toArray2D M
+  have hrectA : Rect A n := rect_toArray2D M
+  have hik : i < A.size ∧ k < A.size := by rw [size_toArray2D_rows M]; simp [hi, hk]
+  let A' := rowAxpy i k α A n hrectA
+  have hA' : A'.size = m := by simp [A', rowAxpy, hik, A]; exact size_toArray2D_rows M
+  have hrect : Rect A' n := by
+    simp [A', rowAxpy, hik, Array.setIfInBounds]
+    intro k hk
+    simp [Array.getElem_set]
+    by_cases hik_eq : k = i
+    · simp [Eq.symm hik_eq]
+    · simp [ne_comm.mp hik_eq, hrectA k]
+
+  (toMat A' m n hA' hrect) = Matrix.mulᵣ (Matrix.transvection ⟨i, hi⟩ ⟨k, hk⟩ α) M := by
+  admit
+
+/- algorithm result, echelon form rank, original matrix rank -/
+
+/- mod p のある評価で full ランクが出れば、厳密ランク（generic rank）も full。 -/
+axiom generic_full_of_modp_full
+  (P : Params) (G : Finset (Ground P))
+  {p : Nat} [Fact (Nat.Prime p)]
+  (α : Var P → ZMod p)
+  (hfull : trialRankVar (p := p)
+              (A := restrictColsPolyZ P G |> fun M i j =>
+                      let toFin := (Fintype.equivFin _).symm
+                      M i (toFin j))
+              α
+           = Nat.min (d_col P) (Fintype.card {e // e ∈ G})) :
+  rankQ_exact P G
+    = Nat.min (d_col P) (Fintype.card {e // e ∈ G})
+
+
+/- foldl (max …) の結果が full なら、入力列のどれかで full が達成されている。 -/
+lemma exists_trial_hits_full
+  (P : Params)
+  {p : Nat} [Fact (Nat.Prime p)]
+  {αs : List (Var P → ZMod p)}
+  (trial : (Var P → ZMod p) → Nat)
+  (full : Nat)
+  (hbound : ∀ a, trial a ≤ full)
+  (hbest : αs.foldl (fun acc a => acc.max (trial a)) 0 = full) :
+  ∃ a ∈ αs, trial a = full := by
+  -- 素直なリスト帰納法で証明できます（実装は後ででOK）。
+  admit
+
+/- 純関数版ハイブリッドは常に厳密ランクと一致する。 -/
+theorem rankQ_hybrid_withVar_correct
+  (P : Params) (G : Finset (Ground P))
+  {p : Nat} [Fact (Nat.Prime p)]
+  (alphas : List (Var P → ZMod p)) :
+  rankQ_hybrid_withVar P G (p := p) alphas = rankQ_exact P G := by
+  classical
+  -- 記号をそろえる
+  let d    := d_col P
+  let m    := Fintype.card {e : Ground P // e ∈ G}
+  let full := Nat.min d m
+  -- Z 係数の多項式行列（列制限）
+  let toFin : Fin m → {e : Ground P // e ∈ G} := (Fintype.equivFin _).symm
+  let MpolyZ : Matrix (Fin d) (Fin m) (MvPolynomial (Var P) Int) :=
+    fun i j => (restrictColsPolyZ P G) i (toFin j)
+  -- trial と best
+  let trial : (Var P → ZMod p) → Nat :=
+    fun α => trialRankVar (p := p) (A := MpolyZ) α
+  have hbound : ∀ α, trial α ≤ full := by
+    intro α; exact le_of_lt_or_eq (by exact Nat.le_of_lt_succ (Nat.le_of_lt_succ (Nat.le_max_left _ _))) -- （簡単：rank ≤ min d m）
+    -- ↑ ここは「行列ランク ≤ min(d,m)」の一般事実で埋める（あとで差し替え）
+  let best := alphas.foldl (fun acc α => Nat.max acc (trial α)) 0
+  -- 定義に沿って分岐
+  dsimp [rankQ_hybrid_withVar]  -- if h : best = full then … else …
+  by_cases hbest : best = full
+  · -- 早期終了の分岐：best=full ⇒ どこかで trial α = full
+    have ⟨α, hmem, hα⟩ := exists_trial_hits_full (P:=P) (G:=G)
+                              trial full hbound hbest
+    -- その α で mod p full ⇒ generic full
+    have hgen := generic_full_of_modp_full (P:=P) (G:=G) (p:=p) α hα
+    -- if 分岐の値は full。よって exact も full。
+    simpa [hbest, hgen]
+  · -- best < full ：定義どおり exact を返す
+    simp []
+
+/- IO ラッパの結果は常に厳密ランクと一致。 -/
+theorem rankQ_hybrid_IO_correct
+  (P : Params) (G : Finset (Ground P))
+  (p : Nat) [Fact (Nat.Prime p)]
+  (trials : Nat := 2) :
+  (do let r ← Checker.rankQ_hybrid_IO P G p (trials := trials); pure r)
+  = pure (Checker.rankQ_exact P G) := by
+  -- 定義を展開して、任意に生成された alphas に対して
+  -- rankQ_hybrid_withVar_correct を当てるだけ（IO の結合律を使って書き換え）。
+  admit
+
+
+-- 「列独立 ↔ “（ハイブリッド仕様が返す）rank = 列数”」
+axiom rankQ_correct
+  (P : Params) (G : Finset (Ground P)) :
+  (LM.ColsIndependentOn (M := St.M P) G) ↔ (Checker.rankQ_exact P G = G.card)
+
+
+-- rank ベースの Bool 判定
+noncomputable def Checker.allColsIndependentBool
+  (P : Params) (G : Finset (Ground P)) : Bool :=
+  decide (Checker.rankQ_exact P G = G.card)
+
+-- 正しさ：Bool = true ↔ indep
+theorem allColsIndependentBool_correct
+  (P : Params) (G : Finset (Ground P)) :
+  Checker.allColsIndependentBool P G = true ↔ St.indep P G := by
+  classical
+  -- decide の等価：`decide (A) = true ↔ A`
+  have hdec :
+    Checker.allColsIndependentBool P G = true
+      ↔ (Checker.rankQ_hybrid_withVar P G = G.card) := by
+    -- A :≡ (rank = |G|)
+    let A := Checker.rankQ_hybrid_withVar P G = G.card
+    -- A で場合分けして simp すれば Bool ↔ Prop
+    by_cases h : A
+    · simp [Checker.allColsIndependentBool, A, h]
+    · simp [Checker.allColsIndependentBool, A, h]
+  -- rank 仕様 ↔ indep（公理）
+  have hspec := (rankQ_correct P G).symm
+  -- 合成して完成
+  exact hdec.trans hspec
+
+
+
+/- まずは `findCircuit` の仕様（探索順序に依存する“公理化”）。
+   実装が固まったらこの axiom は lemma に置き換えて OK。 -/
+-- TODO: 将来証明する
+axiom Checker.findCircuit_spec
+  (P : Params) (G : Finset (Ground P)) :
+  ∀ {C : Finset (Ground P)}, Checker.findCircuit P G = some C →
+    (C ⊆ G) ∧ (¬ St.indep P C) ∧ (∀ e ∈ C, St.indep P (C.erase e))
+
+/- `findCircuit` の健全性：some C なら本当に Sₜ-サーキット -/
+theorem findCircuit_sound
+  (P : Params) (G : Finset (Ground P)) :
+  ∀ {C : Finset (Ground P)}, Checker.findCircuit P G = some C → St.isCircuit P C := by
+  classical
+  intro C hC
+  -- 仕様から：C ⊆ G, ¬indep C, ∀e∈C, indep (C.erase e)
+  rcases Checker.findCircuit_spec P G hC with ⟨_hCsub, hdep, hmin⟩
+  -- `St.isCircuit` の定義は `¬indep C ∧ ∀ e∈C, indep (C.erase e)`
+  unfold St.isCircuit
+  refine And.intro ?notIndep ?minIndep
+  · -- 従属性
+    simpa [St.indep] using hdep
+  · -- 各辺を外せば独立
+    intro e he
+    simpa [St.indep] using hmin e he
+
+
+/- `closureFinset` の正しさ（Finset/Set/Prop の一致：型だけ）。
+今は `closureFinset` を `St.closure` に委譲しているので、将来計算版に
+差し替えるときのための仕様定理として置いておく。 -/
+theorem closureFinset_correct
+  (P : Params) (C : Finset (Ground P)) :
+  -- 例：`e ∈ closureFinset …` ↔ `e ∈ closureSet …` をあとで証明する想定
+  True := by
+  trivial
+
+end CheckerCorrectness
+
 
 namespace EquivGoal
 

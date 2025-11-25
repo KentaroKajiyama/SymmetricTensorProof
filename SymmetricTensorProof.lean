@@ -1,1 +1,0 @@
-import SymmetricTensorProof.Basic
