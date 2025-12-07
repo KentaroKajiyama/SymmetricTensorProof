@@ -14,5 +14,10 @@ maxSynthPendingDepth = 3
 name = "mathlib"
 scope = "leanprover-community"
 
+[[require]]
+name = "ln_messagepack"
+git = "https://github.com/ItsMeForLua/ln_messagepack"
+rev = "main"
+
 [[lean_lib]]
 name = "SymmetricTensorProof"
