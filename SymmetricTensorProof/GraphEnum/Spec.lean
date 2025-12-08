@@ -8,6 +8,7 @@ import Mathlib.GroupTheory.Perm.Basic
 import Mathlib.Order.RelIso.Basic
 import Mathlib.Tactic
 
+noncomputable section
 
 namespace GraphEnumeration
 
@@ -15,7 +16,7 @@ open SimpleGraph
 
 attribute [local instance] Classical.propDecidable
 
-variable {V : Type*} [Fintype V] [DecidableEq V]
+variable {V : Type*} [Fintype V]
 
 /- Graph Isomorphism defined as Relation Isomorphism on Adjacency. -/
 abbrev Iso (G H : SimpleGraph V) := RelIso G.Adj H.Adj
@@ -268,13 +269,29 @@ lemma lemma_add_edge_card
       · rintro (h_in | h_eq)
         · constructor
           · left; exact h_in
-          · exact SimpleGraph.not_isDiag_of_mem_edgeSet G h_in
+          · have h_isDiag : e.IsDiag ↔ e ∈ Sym2.diagSet := by
+              induction e using Sym2.ind with | _ a b =>
+                simp only [Sym2.diagSet]
+                rw [Sym2.isDiag_iff_proj_eq]
+                constructor
+                · intro h
+                  dsimp at h
+                  rw [h]
+                  exact ⟨_, rfl⟩
+                · rintro ⟨x, h⟩
+                  change s(x, x) = s(a, b) at h
+                  rw [Sym2.eq_iff] at h
+                  rcases h with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
+            rw [←h_isDiag]
+            exact SimpleGraph.not_isDiag_of_mem_edgeSet G h_in
         · constructor
           · right; exact h_eq
-          · rw [h_eq, Sym2.isDiag_iff_proj_eq]
-            intro h_diag
-            rcases h_diag with ⟨rfl, rfl⟩
-            contradiction
+          · rw [h_eq]
+            intro h_in_diag
+            simp only [Sym2.diagSet, Set.mem_range, Sym2.diag] at h_in_diag
+            rcases h_in_diag with ⟨x, hx⟩
+            rw [Sym2.eq_iff] at hx
+            rcases hx with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> contradiction
     have h_finset_eq : (add_edge G u v).edgeFinset = insert s(u,v) G.edgeFinset := by
         ext e
         rw [Finset.mem_insert]
@@ -439,7 +456,6 @@ lemma lemma_isolated_valid (G : SimpleGraph V) (v1 u_a u_b : V) (anchors : List 
   exact Nonempty.intro (AnchoredIso.mk iso_rel h_anchors_fixed)
 
 /- Helper lemma for reverse step: decreasing degree by removing an edge to a non-anchor -/
-open Classical in
 lemma step_reverse_lemma
   (G : SimpleGraph V) (v_target : V) (k_edges : ℕ) (k_deg : ℕ) (forbidden : List V)
   (h_card : G.edgeFinset.card = k_edges + 1)
@@ -455,6 +471,7 @@ lemma step_reverse_lemma
     (∀ u ∈ forbidden, ¬G_prev.Adj v_target u) ∧
     ∃ u, u ∉ forbidden ∧ G = add_edge G_prev v_target u := by
   -- Select a neighbor u of v_target
+  classical
   have h_non_empty : (G.neighborFinset v_target).card > 0 := by omega
   have ⟨u, h_u_neighbor⟩ : ∃ u, u ∈ G.neighborFinset v_target := Finset.card_pos.mp h_non_empty
   rw [SimpleGraph.mem_neighborFinset] at h_u_neighbor
@@ -491,7 +508,22 @@ lemma step_reverse_lemma
       · rintro ⟨⟨h_in, h_ne⟩, _⟩
         exact ⟨h_ne, h_in⟩
       · rintro ⟨h_ne, h_in⟩
-        refine ⟨⟨h_in, h_ne⟩, SimpleGraph.not_isDiag_of_mem_edgeSet G h_in⟩
+        refine ⟨⟨h_in, h_ne⟩, ?_⟩
+        have : e.IsDiag ↔ e ∈ Sym2.diagSet := by
+          induction e using Sym2.ind with | _ a b =>
+            simp only [Sym2.diagSet]
+            rw [Sym2.isDiag_iff_proj_eq]
+            constructor
+            · intro h
+              dsimp at h
+              rw [h]
+              exact ⟨_, rfl⟩
+            · rintro ⟨x, h⟩
+              change s(x, x) = s(a, b) at h
+              rw [Sym2.eq_iff] at h
+              rcases h with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
+        rw [←this]
+        exact SimpleGraph.not_isDiag_of_mem_edgeSet G h_in
     rw [h_fin]
     rw [Finset.card_erase_of_mem h_edge_removed]
     rw [h_card];

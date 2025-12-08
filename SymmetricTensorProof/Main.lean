@@ -101,7 +101,7 @@ def verify_line
   let n_val_opt := parts[2]!.toNat? -- 📌 新規: N のパース
   let c_inds_str := parts[3]!       -- 📌 インデックス移動
   let class_idx_opt := parts[5]!.toNat? -- 📌 インデックス移動
-  let edges_str := parts[6]!         -- 📌 インデックス移動
+  let edges_str := parts[6]!.trim         -- 📌 インデックス移動
 
   if tag_opt.isNone || seed_opt.isNone || n_val_opt.isNone || class_idx_opt.isNone then
     IO.println s!"[ERROR] Line {line_idx}: Parse error in numeric fields."
@@ -120,7 +120,7 @@ def verify_line
   }
 
   if n_val < t_val then
-    IO.println s!"[FATAL] Invalid params: n={n_val} < t={t_val}"
+    IO.println s!"[WARN] Invalid params: n={n_val} < t={t_val}"
     return false
 
   match parse_graph_from_text P edges_str with
