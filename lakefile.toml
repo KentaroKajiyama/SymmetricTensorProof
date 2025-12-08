@@ -1,10 +1,13 @@
 name = "SymmetricTensorProof"
 version = "0.1.0"
 keywords = ["math"]
-defaultTargets = ["SymmetricTensorProof"]
+
+# デフォルトで「ライブラリ」ではなく「実行ファイル」をビルドしたい場合は
+# lean_exe のターゲット名に合わせて指定します（例： "symm-tensor-proof"）
+defaultTargets = ["symm-tensor-proof"]
 
 [leanOptions]
-pp.unicode.fun = true # pretty-prints `fun a ↦ b`
+pp.unicode.fun = true                 # pretty-prints `fun a ↦ b`
 autoImplicit = false
 relaxedAutoImplicit = false
 weak.linter.mathlibStandardSet = true
@@ -14,10 +17,16 @@ maxSynthPendingDepth = 3
 name = "mathlib"
 scope = "leanprover-community"
 
-[[require]]
-name = "ln_messagepack"
-git = "https://github.com/ItsMeForLua/ln_messagepack"
-rev = "main"
-
+# ライブラリ（必要ならそのまま維持）
 [[lean_lib]]
 name = "SymmetricTensorProof"
+
+[[lean_exe]]
+name = "verify_proof"
+root = "SymmetricTensorProof.Main"
+
+# 実行ファイルターゲットの追加
+[[lean_exe]]
+name = "symm-tensor-proof"         # Lake上のターゲット名（任意）
+root = "SymmetricTensorProof.Main" # エントリーモジュール（mainを定義）
+exeName = "symm-tensor-proof"      # 生成されるバイナリ名（任意）

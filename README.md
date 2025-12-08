@@ -10,4 +10,24 @@ To set up your new GitHub repository, follow these steps:
 * Click the **Pages** section of the settings sidebar.
 * In the **Source** dropdown menu, select "GitHub Actions".
 
+
 After following the steps above, you can remove this section from the README file.
+
+## Build and Execution
+
+To build the executable:
+```bash
+lake build verify_proof
+```
+
+The binary will be located at `.lake/build/bin/verify_proof.exe`.
+
+Usage:
+```bash
+./.lake/build/bin/verify_proof.exe <input_file> <t> <p>
+```
+Example:
+```bash
+./.lake/build/bin/verify_proof.exe input.txt 3 17
+```
+

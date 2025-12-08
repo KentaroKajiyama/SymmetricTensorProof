@@ -1,0 +1,53 @@
+SymmetricTensorProof/Main.lean:45:13: error: failed to prove index is valid, possible solutions:
+  - Use `have`-expressions to prove the index is valid
+  - Use `a[i]!` notation instead, runtime check is performed, and 'Panic' error message is produced if index is not valid
+  - Use `a[i]?` notation instead, result is an `Option` type
+  - Use `a[i]'h` notation instead, where `h` is a proof that index is valid
+P : Params
+seed p : ℕ
+inst✝ : Fact (Nat.Prime p)
+rng_initial : LcRNG := { state := UInt64.ofNat seed }
+values : Array (ZMod p)
+snd✝ : LcRNG
+i : Fin P.n
+j : Fin P.t
+⊢ ↑i < values.size
+SymmetricTensorProof/Main.lean:43:20: error: Application type mismatch: The argument
+  row_vals
+has type
+  Array (ZMod p)
+but is expected to have type
+  ZMod p
+in the application
+  acc_outer.push row_vals
+SymmetricTensorProof/Main.lean:45:22: error: unexpected token '!['; expected command
+SymmetricTensorProof/Main.lean:62:25: error: Application type mismatch: The argument
+  some ∅
+has type
+  Option ?m.16
+but is expected to have type
+  Graph P
+in the application
+  pure (some ∅)
+SymmetricTensorProof/Main.lean:84:9: error: Application type mismatch: The argument
+  some edge_list.toFinset
+has type
+  Option (Finset (Sym2 (Fin P.n)))
+but is expected to have type
+  Graph P
+in the application
+  pure (some edge_list.toFinset)
+SymmetricTensorProof/Main.lean:144:24: error: typeclass instance problem is stuck
+  Fact (Nat.Prime (?m.409 y✝¹ y✝ G))
+
+Note: Lean will not try to resolve this typeclass instance problem because the type argument to `Fact` contains metavariables. This argument must be fully determined before Lean will try to resolve the typeclass.
+
+Hint: Adding type annotations and supplying implicit arguments to functions can give Lean more information for typeclass resolution. For example, if you have a variable `x` that you intend to be a `Nat`, but Lean reports it as having an unresolved type like `?m`, replacing `x` with `(x : Nat)` can get typeclass resolution un-stuck.
+SymmetricTensorProof/Main.lean:225:25: error: Invalid field `zipWithIndex`: The environment does not contain `Array.zipWithIndex`
+  lines
+has type
+  Array String
+SymmetricTensorProof/Main.lean:225:2: error: failed to construct 'ForIn' instance for collection
+  ?m.381
+and monad
+  EIO IO.Error
