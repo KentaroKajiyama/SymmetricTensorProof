@@ -261,7 +261,7 @@ lemma lemma_add_edge_card
       (SimpleGraph.fromEdgeSet (G.edgeSet ∪ {s(u, v)})).edgeSet = G.edgeSet ∪ {s(u, v)} := by
       ext e
       simp only [SimpleGraph.edgeSet_fromEdgeSet,
-        Set.mem_diff, Set.mem_union, Set.mem_singleton_iff, Set.mem_setOf_eq]
+        Set.mem_diff, Set.mem_union, Set.mem_singleton_iff]
       constructor
       · rintro ⟨(h_in | h_eq), h_ndiag⟩
         · left; exact h_in
@@ -381,7 +381,6 @@ lemma lemma_isolated_valid (G : SimpleGraph V) (v1 u_a u_b : V) (anchors : List 
   Nonempty (AnchoredIso (add_edge G v1 u_a) (add_edge G v1 u_b) anchors) := by
   intro h_iso1 h_iso2 h_ne1 h_ne2 h_not_anchor1 h_not_anchor2
   let σ := Equiv.swap u_a u_b
-
   have h_iso_degree (u : V) (h_iso : (G.neighborFinset u).card = 0) : ∀ v, ¬G.Adj u v := by
     intro v h_adj
     rw [Finset.card_eq_zero] at h_iso
@@ -390,36 +389,29 @@ lemma lemma_isolated_valid (G : SimpleGraph V) (v1 u_a u_b : V) (anchors : List 
       exact h_adj
     rw [h_iso] at h_mem
     exact Finset.notMem_empty v h_mem
-
   have h_iso1_adj := h_iso_degree u_a h_iso1
   have h_iso2_adj := h_iso_degree u_b h_iso2
-
   have h_σ_v : ∀ v, v ≠ u_a → v ≠ u_b → σ v = v := by
     intros v hv1 hv2
     exact Equiv.swap_apply_of_ne_of_ne hv1 hv2
-
   have h_anchors_fixed : ∀ a ∈ anchors, σ a = a := by
     intros a ha
     apply h_σ_v
     · exact fun h => h_not_anchor1 (h ▸ ha)
     · exact fun h => h_not_anchor2 (h ▸ ha)
-
   have h_v1_fixed : σ v1 = v1 := by
     apply h_σ_v
     · exact h_ne1.symm
     · exact h_ne2.symm
-
   let iso_rel : RelIso (add_edge G v1 u_a).Adj (add_edge G v1 u_b).Adj := RelIso.mk σ (by
       intros x y
       simp only [lemma_add_edge_adj G v1 u_a h_ne1.symm, lemma_add_edge_adj G v1 u_b h_ne2.symm]
-
       have h_adj_equiv : G.Adj (σ x) (σ y) ↔ G.Adj x y := by
           have not_adj_of_mem : ∀ z ∈ ({u_a, u_b} : Set V), ∀ w, ¬G.Adj z w := by
             intro z hz w
             simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hz
             cases hz with | inl h =>
               rw [h]; exact h_iso1_adj w | inr h => rw [h]; exact h_iso2_adj w
-
           by_cases hx : x ∈ ({u_a, u_b} : Set V)
           · rw [iff_false_intro (not_adj_of_mem x hx y)]
             have hsx : σ x ∈ ({u_a, u_b} : Set V) := by
@@ -432,7 +424,6 @@ lemma lemma_isolated_valid (G : SimpleGraph V) (v1 u_a u_b : V) (anchors : List 
               rw [iff_false_intro (fun h => not_adj_of_mem (σ y) hsy (σ x) (G.symm h))]
             · simp at hx hy
               rw [h_σ_v x hx.1 hx.2, h_σ_v y hy.1 hy.2]
-
       have h_edge_equiv : s(σ x, σ y) = s(v1, u_b) ↔ s(x, y) = s(v1, u_a) := by
         rw [Sym2.eq_iff, Sym2.eq_iff]
         constructor
@@ -450,9 +441,7 @@ lemma lemma_isolated_valid (G : SimpleGraph V) (v1 u_a u_b : V) (anchors : List 
           · right; constructor
             · rw [h1]; simp [σ]
             · rw [h2]; exact h_v1_fixed
-
       rw [h_adj_equiv, h_edge_equiv])
-
   exact Nonempty.intro (AnchoredIso.mk iso_rel h_anchors_fixed)
 
 /- Helper lemma for reverse step: decreasing degree by removing an edge to a non-anchor -/
@@ -475,17 +464,14 @@ lemma step_reverse_lemma
   have h_non_empty : (G.neighborFinset v_target).card > 0 := by omega
   have ⟨u, h_u_neighbor⟩ : ∃ u, u ∈ G.neighborFinset v_target := Finset.card_pos.mp h_non_empty
   rw [SimpleGraph.mem_neighborFinset] at h_u_neighbor
-
   -- u is not forbidden
   have h_u_not_forbidden : u ∉ forbidden := by
     intro h_in
     have := h_pairwise_adj u h_in
     contradiction
-
   -- Define G_prev by removing edge (v_target, u)
   let G_prev := SimpleGraph.fromEdgeSet (G.edgeSet \ {s(v_target, u)})
   exists G_prev
-
   have h_G_prev_adj : ∀ x y, G_prev.Adj x y ↔ G.Adj x y ∧ s(x, y) ≠ s(v_target, u) := by
     intros x y
     rw [SimpleGraph.fromEdgeSet_adj]
@@ -493,7 +479,6 @@ lemma step_reverse_lemma
     constructor
     · rintro ⟨h, _⟩; exact h
     · intro h; exact ⟨h, G.ne_of_adj h.1⟩
-
   -- Check size
   have h_edge_removed : s(v_target, u) ∈ G.edgeFinset := by
     simp; exact h_u_neighbor
@@ -503,7 +488,7 @@ lemma step_reverse_lemma
       ext e
       rw [SimpleGraph.mem_edgeFinset]
       simp only [SimpleGraph.edgeSet_fromEdgeSet, Finset.mem_erase,
-                SimpleGraph.mem_edgeFinset, Set.mem_diff, Set.mem_singleton_iff, Set.mem_setOf_eq]
+                SimpleGraph.mem_edgeFinset, Set.mem_diff, Set.mem_singleton_iff]
       constructor
       · rintro ⟨⟨h_in, h_ne⟩, _⟩
         exact ⟨h_ne, h_in⟩
@@ -528,14 +513,12 @@ lemma step_reverse_lemma
     rw [Finset.card_erase_of_mem h_edge_removed]
     rw [h_card];
     simp
-
   -- Check MaxDegree4 (removing edge doesn't increase degree)
   have h_prev_sub : ∀ x, G_prev.neighborFinset x ⊆ G.neighborFinset x := by
     intro x; intro y; simp [SimpleGraph.mem_neighborFinset]; rw [h_G_prev_adj]; tauto
   have h_max_prev : MaxDegree4 G_prev := by
     intro v
     convert le_trans (Finset.card_le_card (h_prev_sub v)) (h_max v)
-
   -- Check Degree of v_target
   have h_deg_prev : (G_prev.neighborFinset v_target).card = k_deg := by
     have h_set_eq : G_prev.neighborFinset v_target = G.neighborFinset v_target \ {u} := by
@@ -559,7 +542,6 @@ lemma step_reverse_lemma
     rw [Finset.inter_eq_left.mpr h_sub]
     rw [h_deg, Finset.card_singleton]
     omega
-
   -- Check add_edge reconstruction
   have h_reconstruct : G = add_edge G_prev v_target u := by
     rw [add_edge]
@@ -577,7 +559,6 @@ lemma step_reverse_lemma
     · rintro ⟨(⟨h, _⟩ | heq), hne⟩
       · exact h
       · rw [←SimpleGraph.mem_edgeSet, heq, SimpleGraph.mem_edgeSet]; exact h_u_neighbor
-
   /- Check forbidden preserved
     (Adj in G_prev implies Adj in G, and Neighbors of v_target in G disjoint from forbidden) -/
   have h_forbid_prev : ∀ w ∈ forbidden, ¬G_prev.Adj v_target w := by
@@ -585,7 +566,6 @@ lemma step_reverse_lemma
     intro h_adj
     apply h_pairwise_adj w hw
     apply (h_G_prev_adj v_target w).mp h_adj |>.1
-
   refine ⟨
     by convert h_card_prev,
     by convert h_max_prev,
@@ -619,7 +599,6 @@ lemma lemma_candidate_edges
   ∃ G_gen ∈ candidates, Nonempty (AnchoredIso G' G_gen anchors) := by
   intros candidates G' h_cond h_anchors_in_forbidden
   rcases h_cond with ⟨h_card, h_max, ⟨u, h_u_not_forbidden, rfl⟩⟩
-
   have h_u_ne_v1 : u ≠ v1 := by
     intro h_eq
     rw [h_eq] at h_card
@@ -637,24 +616,20 @@ lemma lemma_candidate_edges
         refine ⟨Or.inl h, G.ne_of_adj h⟩
     rw [h_G_eq] at h_card
     simp at h_card
-
   have h_not_adj : ¬G.Adj v1 u := by
     intro h
     rw [lemma_add_edge_card _ _ _ h_u_ne_v1.symm] at h_card
     simp [h] at h_card
-
   let isolated_list := (Finset.univ.filter (fun v =>
       (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).toList
   have h_iso_def : isolated_list = (Finset.univ.filter (fun v =>
       (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).toList := rfl
-
   let unused_list := (Finset.univ.filter (fun v =>
         (G.neighborFinset v).card ≥ 1 ∧ (G.neighborFinset v).card ≤ 3
         ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).toList
   have h_unused_def : unused_list = (Finset.univ.filter (fun v =>
         (G.neighborFinset v).card ≥ 1 ∧ (G.neighborFinset v).card ≤ 3
         ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).toList := rfl
-
   cases h_iso : isolated_list with
   | nil =>
     have h_cands : candidates = unused_list.map (fun v => add_edge G v1 v) := by
@@ -703,7 +678,6 @@ lemma lemma_candidate_edges
         contradiction
       exact ⟨by omega, h_deg, h_not_adj, h_u_ne_v1, h_u_not_forbidden⟩
     · exact Nonempty.intro (AnchoredIso.refl _ _)
-
   | cons u_rep rest =>
     have h_cands : candidates =
       (add_edge G v1 u_rep) :: (unused_list.map (fun v => add_edge G v1 v)) := by
@@ -793,27 +767,22 @@ theorem step_completeness
   intros h_prev_complete h_step h_anchors_cond h_v1_anchor h_forbidden_sub G h_P_next
   rcases h_step G h_P_next with ⟨G_prev, h_prev, h_card, h_max, u, h_u_not_forbidden, h_G_eq⟩
   rcases h_prev_complete G_prev h_prev with ⟨G_S, h_S, ⟨iso_prev⟩⟩
-
   -- Construct the candidate graph from G_S
   let u_S := iso_prev.toEquiv u
   let G_S_next := add_edge G_S v1 u_S
-
   have h_iso_v1 : iso_prev.toEquiv v1 = v1 := iso_prev.fix_anchors v1 h_v1_anchor
   let φ := iso_prev.toEquiv
-
   have h_u_ne : u ≠ v1 := by
     intro h; rw [h] at h_G_eq
     have : add_edge G_prev v1 v1 = G_prev := lemma_add_edge_self G_prev v1
     rw [h_G_eq, this] at h_card
     simp at h_card
-
   have h_u_S_ne : u_S ≠ v1 := by
     intro h
     apply h_u_ne
     apply φ.injective
     rw [h_iso_v1]
     exact h
-
   have h_G_S_next_iso : Nonempty (AnchoredIso G G_S_next anchors) := by
     have h_map : ∀ {x y : V}, G_S_next.Adj (φ x) (φ y) ↔ G.Adj x y := by
       intros x y
@@ -834,7 +803,6 @@ theorem step_completeness
       rw [h_edge]
     refine Nonempty.intro
       { toEquiv := φ, map_rel_iff' := h_map, fix_anchors := iso_prev.fix_anchors }
-
   -- Ensure G_S_next is a valid candidate
   have h_G_S_next_cond : G_S_next.edgeFinset.card = G_S.edgeFinset.card + 1 ∧
                         MaxDegree4 G_S_next ∧
@@ -848,14 +816,10 @@ theorem step_completeness
         rw [h_G_eq] at h_card
         rw [lemma_add_edge_card _ _ _ h_u_ne.symm] at h_card
         simp [h_adj] at h_card
-
-
       rw [lemma_add_edge_card _ _ _ h_u_S_ne.symm]
       rw [if_neg h_not_adj]
-
     have h_max_gen : MaxDegree4 G_S_next := by
       apply (AnchoredIso.max_degree_iff h_G_S_next_iso.some).mp h_max
-
     have h_u_S_not_forbidden : u_S ∉ forbidden := by
       intro h_in
       have h_anchor_u_S : u_S ∈ anchors := h_forbidden_sub u_S h_in
@@ -867,20 +831,14 @@ theorem step_completeness
         rw [←h_phi_u, h_fixed_u]
       rw [h_u_eq_u_S] at h_u_not_forbidden
       contradiction
-
     exact ⟨h_card_incr, h_max_gen, u_S, h_u_S_not_forbidden, rfl⟩
-
   -- G_S_next is in transition S
-
-
   -- Apply lemma_candidate_edges to G_S
   obtain ⟨G_gen, h_gen_mem, ⟨iso_gen⟩⟩
     := lemma_candidate_edges G_S v1 forbidden anchors G_S_next h_G_S_next_cond h_anchors_cond
-
   have h_trans : G_gen ∈ transition S v1 forbidden := by
     simp [transition]
     exact ⟨G_S, h_S, h_gen_mem⟩
-
   -- reduce_iso guarantees existence of a representative in the reduced list
   rcases reduce_iso_soundness
     (transition S v1 forbidden) anchors G_gen h_trans with ⟨G_rep, h_rep_mem, ⟨iso_rep⟩⟩
@@ -1012,7 +970,8 @@ theorem Gamma_4_4_is_complete
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v1 7 0 [v2, v3, v4] h_card h_max h_deg
           (fun u hu => h_extract v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
-          (fun u hu => h_pairwise_extract anchors h_distinct (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
+          (fun u hu =>
+            h_pairwise_extract anchors h_distinct (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
         constructor
@@ -1088,7 +1047,8 @@ theorem Gamma_4_4_is_complete
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v1 9 2 [v2, v3, v4] h_card h_max h_deg
           (fun u hu => h_extract v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
-          (fun u hu => h_pairwise_extract anchors h_distinct (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
+          (fun u hu =>
+            h_pairwise_extract anchors h_distinct (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
         have h_prev_adj : List.Pairwise (fun a b => ¬G_prev.Adj a b) [v1, v2, v3, v4] :=
@@ -1147,7 +1107,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v2 10 0 [v1, v3, v4] h_card h_max h_d2
-          (fun u hu => h_extract v2 h_v2_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24))
+          (fun u hu => h_extract v2 h_v2_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1193,7 +1154,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v2 11 1 [v1, v3, v4] h_card h_max h_d2
-          (fun u hu => h_extract v2 h_v2_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24))
+          (fun u hu => h_extract v2 h_v2_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1238,7 +1200,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v2 12 2 [v1, v3, v4] h_card h_max h_d2
-          (fun u hu => h_extract v2 h_v2_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24))
+          (fun u hu => h_extract v2 h_v2_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h21; exact h23; exact h24)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1299,7 +1262,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v3 13 0 [v1, v2, v4] h_card h_max h_d3
-          (fun u hu => h_extract v3 h_v3_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
+          (fun u hu => h_extract v3 h_v3_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1336,8 +1300,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
-
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in
+        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
     let S3_2 := reduce_iso (transition S3_1 v3 [v1, v2, v4]) anchors
     have h3_2 : complete_anchored_enumeration S3_2 (Gamma_3_Step 2 v1 v2 v3 v4) anchors :=
       step_completeness S3_1 (Gamma_3_Step 1 v1 v2 v3 v4) (Gamma_3_Step 2 v1 v2 v3 v4) v3 [v1, v2, v4] anchors h3_1
@@ -1346,7 +1310,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v3 14 1 [v1, v2, v4] h_card h_max h_d3
-          (fun u hu => h_extract v3 h_v3_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
+          (fun u hu => h_extract v3 h_v3_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1385,7 +1350,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in
+        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
 
     let S3_3 := reduce_iso (transition S3_2 v3 [v1, v2, v4]) anchors
     have h3_3 : complete_anchored_enumeration S3_3 (Gamma_3_Step 3 v1 v2 v3 v4) anchors :=
@@ -1395,7 +1361,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v3 15 2 [v1, v2, v4] h_card h_max h_d3
-          (fun u hu => h_extract v3 h_v3_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
+          (fun u hu => h_extract v3 h_v3_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1434,8 +1401,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
-
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in
+        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
     let S3_4 := reduce_iso (transition S3_3 v3 [v1, v2, v4]) anchors
     have h3_4 : complete_anchored_enumeration S3_4 (Gamma_3_Step 4 v1 v2 v3 v4) anchors :=
       step_completeness S3_3 (Gamma_3_Step 3 v1 v2 v3 v4) (Gamma_3_Step 4 v1 v2 v3 v4) v3 [v1, v2, v4] anchors h3_3
@@ -1444,7 +1411,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v3 16 3 [v1, v2, v4] h_card h_max h_d3
-          (fun u hu => h_extract v3 h_v3_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
+          (fun u hu => h_extract v3 h_v3_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h31; exact h32; exact h34)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1483,7 +1451,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in
+        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
 
     -- === Gamma 4 ===
     have h4_0 : complete_anchored_enumeration S3_4 (Gamma_4_Step 0 v1 v2 v3 v4) anchors := by
@@ -1503,7 +1472,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v4 17 0 [v1, v2, v3] h_card h_max h_d4
-          (fun u hu => h_extract v4 h_v4_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
+          (fun u hu => h_extract v4 h_v4_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1547,7 +1517,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in
+        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
 
     let S4_2 := reduce_iso (transition S4_1 v4 [v1, v2, v3]) anchors
     have h4_2 : complete_anchored_enumeration S4_2 (Gamma_4_Step 2 v1 v2 v3 v4) anchors :=
@@ -1557,7 +1528,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v4 18 1 [v1, v2, v3] h_card h_max h_d4
-          (fun u hu => h_extract v4 h_v4_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
+          (fun u hu => h_extract v4 h_v4_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1601,8 +1573,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
-
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in
+        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
     let S4_3 := reduce_iso (transition S4_2 v4 [v1, v2, v3]) anchors
     have h4_3 : complete_anchored_enumeration S4_3 (Gamma_4_Step 3 v1 v2 v3 v4) anchors :=
       step_completeness S4_2 (Gamma_4_Step 2 v1 v2 v3 v4) (Gamma_4_Step 3 v1 v2 v3 v4) v4 [v1, v2, v3] anchors h4_2
@@ -1611,7 +1583,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v4 19 2 [v1, v2, v3] h_card h_max h_d4
-          (fun u hu => h_extract v4 h_v4_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
+          (fun u hu => h_extract v4 h_v4_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1655,7 +1628,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in
+        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
 
     let S4_4 := reduce_iso (transition S4_3 v4 [v1, v2, v3]) anchors
     have h4_4 : complete_anchored_enumeration S4_4 (Gamma_4_Step 4 v1 v2 v3 v4) anchors :=
@@ -1665,7 +1639,8 @@ theorem Gamma_4_4_is_complete
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v4 20 3 [v1, v2, v3] h_card h_max h_d4
-          (fun u hu => h_extract v4 h_v4_in u (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
+          (fun u hu => h_extract v4 h_v4_in u
+            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
           (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
@@ -1709,7 +1684,8 @@ theorem Gamma_4_4_is_complete
             · exact h_max
             · exists u
       )
-      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in (by intros x hx; simp at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
+      (by intros a ha; simp [anchors] at ha; simp; tauto) h_v4_in
+        (by intros x hx; simp at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v3_in)
 
     exact h4_4
 

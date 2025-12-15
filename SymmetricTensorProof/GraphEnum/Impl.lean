@@ -99,5 +99,26 @@ lemma get_add_edge {n} (g : AdjMat n) (u v x y : Fin n) :
     · simp [h2]
     · simp [h1, h2]
 
+lemma get_add_edge_Prop {n} (g : AdjMat n) (u v x y : Fin n) :
+    (g.add_edge u v).get x y = true ↔
+    (g.get x y = true ∨ (x = u ∧ y = v) ∨ (x = v ∧ y = u)) := by
+  rw [get_add_edge]
+  simp [Bool.or_eq_true]
+  tauto
+
+/-- Get list of isolated vertices (degree = 0) that are not v1 and not in forbidden -/
+def get_isolated {n} (g : AdjMat n) (v1 : Fin n) (forbidden : List (Fin n)) : List (Fin n) :=
+  let all_vertices := List.finRange n
+  all_vertices.filter (fun v => g.degree v == 0 && !(v == v1) && !forbidden.elem v)
+
+/-- Get list of unused vertices (1 ≤ degree ≤ 3) that are not adjacent to v1,
+    not v1, and not in forbidden -/
+def get_unused {n} (g : AdjMat n) (v1 : Fin n) (forbidden : List (Fin n)) : List (Fin n) :=
+  let all_vertices := List.finRange n
+  all_vertices.filter (fun v =>
+    let deg := g.degree v
+    decide (1 <= deg) && decide (deg <= 3) && !g.get v1 v && !(v == v1) && !forbidden.elem v
+  )
+
 end AdjMat
 end GraphEnumeration

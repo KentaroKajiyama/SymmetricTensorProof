@@ -23,6 +23,11 @@ theorem toSimpleGraph_adj (g : AdjMat n) (u v : Fin n) :
   (toSimpleGraph g).Adj u v ↔ (g.get u v ∨ g.get v u) ∧ u ≠ v := by
   simp [toSimpleGraph, and_comm]
 
+instance (g : AdjMat n) : DecidableRel (toSimpleGraph g).Adj := by
+  intro u v
+  rw [toSimpleGraph_adj]
+  infer_instance
+
 /-
 Correctness theorem: `add_edge` on AdjMat corresponds to `add_edge` on SimpleGraph.
 -/
@@ -59,5 +64,30 @@ theorem add_edge_correct (g : AdjMat n) (u v : Fin n) :
     · refine ⟨?_, h_ne⟩; right; left; left; exact h_get_yx
     · refine ⟨?_, h_ne⟩; left; left; right; exact h_eq1
     · refine ⟨?_, h_ne⟩; left; right; exact h_eq2
+
+/-
+Task A: Degree correctness
+The degree computed by AdjMat matches the degree in the SimpleGraph model.
+-/
+theorem degree_correct {n} (g : AdjMat n) (u : Fin n) :
+    g.degree u = ((toSimpleGraph g).neighborFinset u).card := by
+  sorry
+
+/-
+Task B: Filtering functions correctness
+-/
+theorem get_isolated_correct {n} (g : AdjMat n) (v1 : Fin n) (forbidden : List (Fin n)) :
+    (AdjMat.get_isolated g v1 forbidden).toFinset =
+    (Finset.univ.filter (fun v =>
+      (toSimpleGraph g).neighborFinset v |>.card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)) := by
+  sorry
+
+theorem get_unused_correct {n} (g : AdjMat n) (v1 : Fin n) (forbidden : List (Fin n)) :
+    (AdjMat.get_unused g v1 forbidden).toFinset =
+    (Finset.univ.filter (fun v =>
+      let deg := (toSimpleGraph g).neighborFinset v |>.card
+      1 ≤ deg ∧ deg ≤ 3 ∧
+      ¬(toSimpleGraph g).Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)) := by
+  sorry
 
 end GraphEnumeration
