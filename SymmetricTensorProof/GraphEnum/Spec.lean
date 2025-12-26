@@ -16,7 +16,7 @@ open SimpleGraph
 
 attribute [local instance] Classical.propDecidable
 
-variable {V : Type*} [Fintype V]
+variable {V : Type*} [Fintype V] [DecidableEq V] [LinearOrder V]
 
 /- Graph Isomorphism defined as Relation Isomorphism on Adjacency. -/
 abbrev Iso (G H : SimpleGraph V) := RelIso G.Adj H.Adj
@@ -25,10 +25,12 @@ abbrev Iso (G H : SimpleGraph V) := RelIso G.Adj H.Adj
 structure AnchoredIso (G H : SimpleGraph V) (anchors : List V) extends RelIso G.Adj H.Adj where
   fix_anchors : ∀ v ∈ anchors, toEquiv v = v
 
+/- Anchored Isomorphism reflexivity -/
 def AnchoredIso.refl (G : SimpleGraph V) (anchors : List V) : AnchoredIso G G anchors :=
   { RelIso.refl G.Adj with
     fix_anchors := fun _ _ => rfl }
 
+/- Anchored Isomorphism transitivity -/
 def AnchoredIso.trans {G H I : SimpleGraph V} {anchors : List V}
   (iso1 : AnchoredIso G H anchors) (iso2 : AnchoredIso H I anchors) : AnchoredIso G I anchors :=
   let trans_iso := RelIso.trans iso1.toRelIso iso2.toRelIso
@@ -51,6 +53,7 @@ open Classical in
 def MaxDegree4 (G : SimpleGraph V) : Prop :=
   ∀ v, (G.neighborFinset v).card ≤ 4
 
+/- Max degree constraint is invariant under anchored isomorphism -/
 lemma AnchoredIso.max_degree_iff
   {G H : SimpleGraph V} {anchors : List V}
   (iso : AnchoredIso G H anchors) : MaxDegree4 G ↔ MaxDegree4 H := by
@@ -100,15 +103,10 @@ lemma AnchoredIso.max_degree_iff
     apply h
 
 /- Gamma_0^0: 7 edges, max degree 4. -/
-open Classical in
-/- Gamma_0^0: 7 edges, max degree 4. -/
-open Classical in
 def Gamma_0_0 (G : SimpleGraph V) : Prop :=
   G.edgeFinset.card = 7 ∧ MaxDegree4 G
 
-/- Incremental Step Definitions -/
-
-open Classical in
+/- Gamma_1^k: k edges added to Gamma_0^0, max degree 4. -/
 def Gamma_1_Step (k : ℕ) (v1 v2 v3 v4 : V) (G : SimpleGraph V) : Prop :=
   G.edgeFinset.card = 7 + k ∧
   MaxDegree4 G ∧
@@ -116,7 +114,7 @@ def Gamma_1_Step (k : ℕ) (v1 v2 v3 v4 : V) (G : SimpleGraph V) : Prop :=
   List.Pairwise (fun a b => ¬G.Adj a b) [v1, v2, v3, v4] ∧
   List.Pairwise (· ≠ ·) [v1, v2, v3, v4]
 
-open Classical in
+/- Gamma_2^k: k edges added to Gamma_1^k, max degree 4. -/
 def Gamma_2_Step (k : ℕ) (v1 v2 v3 v4 : V) (G : SimpleGraph V) : Prop :=
   G.edgeFinset.card = 10 + k ∧
   MaxDegree4 G ∧
@@ -124,7 +122,7 @@ def Gamma_2_Step (k : ℕ) (v1 v2 v3 v4 : V) (G : SimpleGraph V) : Prop :=
   List.Pairwise (fun a b => ¬G.Adj a b) [v1, v2, v3, v4] ∧
   List.Pairwise (· ≠ ·) [v1, v2, v3, v4]
 
-open Classical in
+/- Gamma_3^k: k edges added to Gamma_2^k, max degree 4. -/
 def Gamma_3_Step (k : ℕ) (v1 v2 v3 v4 : V) (G : SimpleGraph V) : Prop :=
   G.edgeFinset.card = 13 + k ∧
   MaxDegree4 G ∧
@@ -133,7 +131,7 @@ def Gamma_3_Step (k : ℕ) (v1 v2 v3 v4 : V) (G : SimpleGraph V) : Prop :=
   List.Pairwise (fun a b => ¬G.Adj a b) [v1, v2, v3, v4] ∧
   List.Pairwise (· ≠ ·) [v1, v2, v3, v4]
 
-open Classical in
+/- Gamma_4^k: k edges added to Gamma_3^k, max degree 4. -/
 def Gamma_4_Step (k : ℕ) (v1 v2 v3 v4 : V) (G : SimpleGraph V) : Prop :=
   G.edgeFinset.card = 17 + k ∧
   MaxDegree4 G ∧
@@ -151,16 +149,8 @@ def Gamma_3 (val : ℕ) (G : SimpleGraph V) : Prop := ∃ v1 v2 v3 v4, Gamma_3_S
 def Gamma_4 (val : ℕ) (G : SimpleGraph V) : Prop := ∃ v1 v2 v3 v4, Gamma_4_Step val v1 v2 v3 v4 G
 
 
-
-
-/- "Completeness" definition.
-    A list of graphs S is a complete enumeration of property P if
+/- "Completeness Definition": A list of graphs S is a complete enumeration of property P if
     for every G satisfying P, there exists a G' in S such that G is isomorphic to G'. -/
-open Classical in
-def complete_enumeration (S : List (SimpleGraph V)) (P : SimpleGraph V → Prop) : Prop :=
-  ∀ G, P G → ∃ G' ∈ S, Nonempty (Iso G G')
-
-open Classical in
 def complete_anchored_enumeration
   (S : List (SimpleGraph V)) (P : SimpleGraph V → Prop) (anchors : List V) : Prop :=
   ∀ G, P G → ∃ G' ∈ S, Nonempty (AnchoredIso G G' anchors)
@@ -175,6 +165,7 @@ axiom reduce_iso_soundness (S : List (SimpleGraph V)) (anchors : List V) :
 def add_edge (G : SimpleGraph V) (u v : V) : SimpleGraph V :=
   SimpleGraph.fromEdgeSet (G.edgeSet ∪ {s(u,v)})
 
+/- Helper lemmas for add_edge preventing from adding loop. -/
 lemma lemma_add_edge_self
   (G : SimpleGraph V) (u : V) : add_edge G u u = G := by
   rw [add_edge]
@@ -189,6 +180,8 @@ lemma lemma_add_edge_self
   · intro h
     refine ⟨Or.inl h, G.ne_of_adj h⟩
 
+/- Helper lemmas for add_edge adjacency.
+  If u ≠ v, then (add_edge G u v).Adj x y ↔ G.Adj x y ∨ s(x, y) = s(u, v). -/
 lemma lemma_add_edge_adj
   (G : SimpleGraph V) (u v : V) (h_ne : u ≠ v) {x y : V} :
   (add_edge G u v).Adj x y ↔ G.Adj x y ∨ s(x, y) = s(u, v) := by
@@ -211,12 +204,17 @@ lemma lemma_add_edge_adj
         · exact h_ne
         · exact h_ne.symm
 
+/- Helper lemmas for add_edge commutativity.
+  If u ≠ v, then add_edge G u v = add_edge G v u.-/
 lemma lemma_add_edge_comm
   (G : SimpleGraph V) (u v : V) :
   add_edge G u v = add_edge G v u := by
   ext a b
   simp [add_edge, SimpleGraph.fromEdgeSet_adj, Sym2.eq_swap]
 
+/- Helper lemmas for add_edge degree.
+  If u ≠ v and x ≠ u and x ≠ v,
+    then ((add_edge G u v).neighborFinset x).card = (G.neighborFinset x).card. -/
 lemma lemma_add_edge_degree_eq_of_ne
   (G : SimpleGraph V) (u v x : V) (h_u_ne : x ≠ u) (h_v_ne : x ≠ v) :
   ((add_edge G u v).neighborFinset x).card = (G.neighborFinset x).card := by
@@ -237,6 +235,10 @@ lemma lemma_add_edge_degree_eq_of_ne
     · intro h
       left; exact h
 
+/- Helper lemmas for add_edge card.
+  If u ≠ v,
+    then (add_edge G u v).edgeFinset.card =
+    if G.Adj u v then G.edgeFinset.card else G.edgeFinset.card + 1. -/
 open Classical in
 lemma lemma_add_edge_card
   (G : SimpleGraph V) (u v : V) (h_neq : u ≠ v) :
@@ -309,70 +311,7 @@ lemma lemma_add_edge_card
     · rw [SimpleGraph.mem_edgeFinset]
       exact h_adj
 
-
-
-
-open Classical in
-lemma lemma_prohibited_edges (G : SimpleGraph V) (v1 u : V) :
-  ((G.neighborFinset u).card = 4 ∨ G.Adj v1 u) →
-  ¬(MaxDegree4 (add_edge G v1 u) ∧
-    (add_edge G v1 u).edgeFinset.card = G.edgeFinset.card + 1) := by
-  intro h_cond
-  rintro ⟨h_max, h_card⟩
-  by_cases h_eq : v1 = u
-  · subst h_eq
-    have : add_edge G v1 v1 = G := by
-      rw [add_edge]
-      ext x y
-      simp [SimpleGraph.mem_edgeSet]
-      apply Iff.intro
-      · rintro ⟨⟨rfl, rfl⟩ | h, h_ne⟩
-        · contradiction
-        · exact h
-      · intro h
-        exact ⟨Or.inr h, G.ne_of_adj h⟩
-    rw [this] at h_card
-    omega
-  · -- v1 != u
-    rcases h_cond with h_deg | h_adj
-    · -- Case 1: Degree of u is 4
-      by_cases h_adj_v1u : G.Adj v1 u
-      · -- Subcase 1.1: Already connected.
-        rw [lemma_add_edge_card _ _ _ h_eq] at h_card
-        simp [h_adj_v1u] at h_card
-      · -- Subcase 1.2: Not connected.
-        have h_neighbors : (add_edge G v1 u).neighborFinset u = G.neighborFinset u ∪ {v1} := by
-            ext x
-            simp only [SimpleGraph.mem_neighborFinset, Finset.mem_union, Finset.mem_singleton]
-            rw [lemma_add_edge_adj _ _ _ h_eq]
-            constructor
-            · rintro (h_adj | h_edge)
-              · left; exact h_adj
-              · right
-                simp only [Sym2.eq_iff] at h_edge
-                rcases h_edge with ⟨rfl, rfl⟩ | ⟨_, rfl⟩
-                · contradiction
-                · simp
-            · rintro (h_adj | rfl)
-              · left; exact h_adj
-              · simp
-        have h_new_deg : ((add_edge G v1 u).neighborFinset u).card = 5 := by
-          rw [h_neighbors]
-          rw [Finset.card_union_of_disjoint]
-          · rw [h_deg]; simp
-          · rw [Finset.disjoint_singleton_right]
-            simp only [SimpleGraph.mem_neighborFinset]
-            intro h
-            apply h_adj_v1u
-            exact G.symm h
-        have h_max_u := h_max u
-        rw [h_new_deg] at h_max_u
-        omega
-    · -- Case 2: Already connected
-      rw [lemma_add_edge_card _ _ _ h_eq] at h_card
-      simp [h_adj] at h_card
-
-/- Lemma 2: Connecting v1 to any isolated vertex yields an isomorphic graph. -/
+/- Connecting v1 to any isolated vertex yields an isomorphic graph. -/
 open Classical in
 lemma lemma_isolated_valid (G : SimpleGraph V) (v1 u_a u_b : V) (anchors : List V) :
   (G.neighborFinset u_a).card = 0 → (G.neighborFinset u_b).card = 0 →
@@ -444,7 +383,9 @@ lemma lemma_isolated_valid (G : SimpleGraph V) (v1 u_a u_b : V) (anchors : List 
       rw [h_adj_equiv, h_edge_equiv])
   exact Nonempty.intro (AnchoredIso.mk iso_rel h_anchors_fixed)
 
-/- Helper lemma for reverse step: decreasing degree by removing an edge to a non-anchor -/
+/- Helper lemma for reverse step: decreasing degree by removing an edge to a non-anchor
+  v_target is an anchored vertex with degree k_deg + 1.
+  forbidden is a list of vertices that cannot be connected anymore. -/
 lemma step_reverse_lemma
   (G : SimpleGraph V) (v_target : V) (k_edges : ℕ) (k_deg : ℕ) (forbidden : List V)
   (h_card : G.edgeFinset.card = k_edges + 1)
@@ -576,19 +517,21 @@ lemma step_reverse_lemma
 
 /- The "Next Step" generation based on the lemmas. -/
 open Classical in
-def generate_next_graphs (G : SimpleGraph V) (v1 : V) (forbidden : List V) : List (SimpleGraph V) :=
+def generate_next_graphs
+  (G : SimpleGraph V) (v1 : V) (forbidden : List V) : List (SimpleGraph V) :=
   let isolated := (Finset.univ.filter (fun v =>
-    (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).toList
+    (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).sort (· ≤ ·)
   let unused := (Finset.univ.filter (fun v =>
     (G.neighborFinset v).card ≥ 1 ∧ (G.neighborFinset v).card ≤ 3
-    ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).toList
+    ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).sort (· ≤ ·)
   -- Pick one isolated if available
   let candidates := match isolated with
     | [] => unused
     | h :: _ => h :: unused
   candidates.map (fun u => add_edge G v1 u)
 
-/- Lemma 1: The generation function covers all valid edge additions. -/
+/- The generate_next_graphs function
+  covers all valid edge (connected to other than forbidden vertices) additions. -/
 open Classical in
 lemma lemma_candidate_edges
   (G : SimpleGraph V) (v1 : V) (forbidden : List V) (anchors : List V) :
@@ -621,15 +564,15 @@ lemma lemma_candidate_edges
     rw [lemma_add_edge_card _ _ _ h_u_ne_v1.symm] at h_card
     simp [h] at h_card
   let isolated_list := (Finset.univ.filter (fun v =>
-      (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).toList
+      (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).sort (· ≤ ·)
   have h_iso_def : isolated_list = (Finset.univ.filter (fun v =>
-      (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).toList := rfl
+      (G.neighborFinset v).card = 0 ∧ v ≠ v1 ∧ v ∉ forbidden)).sort (· ≤ ·) := rfl
   let unused_list := (Finset.univ.filter (fun v =>
         (G.neighborFinset v).card ≥ 1 ∧ (G.neighborFinset v).card ≤ 3
-        ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).toList
+        ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).sort (· ≤ ·)
   have h_unused_def : unused_list = (Finset.univ.filter (fun v =>
         (G.neighborFinset v).card ≥ 1 ∧ (G.neighborFinset v).card ≤ 3
-        ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).toList := rfl
+        ∧ ¬G.Adj v1 v ∧ v ≠ v1 ∧ v ∉ forbidden)).sort (· ≤ ·) := rfl
   cases h_iso : isolated_list with
   | nil =>
     have h_cands : candidates = unused_list.map (fun v => add_edge G v1 v) := by
@@ -642,7 +585,7 @@ lemma lemma_candidate_edges
     exists u
     constructor
     · rw [h_unused_def]
-      rw [Finset.mem_toList, Finset.mem_filter]
+      rw [Finset.mem_sort, Finset.mem_filter]
       simp only [Finset.mem_univ, true_and]
       have h_deg : (G.neighborFinset u).card ≤ 3 := by
         have h_bound := h_max u
@@ -671,7 +614,7 @@ lemma lemma_candidate_edges
         intro h0
         have : u ∈ isolated_list := by
           rw [h_iso_def]
-          rw [Finset.mem_toList, Finset.mem_filter]
+          rw [Finset.mem_sort, Finset.mem_filter]
           simp only [Finset.mem_univ, true_and]
           exact ⟨h0, h_u_ne_v1, h_u_not_forbidden⟩
         rw [h_iso] at this
@@ -694,7 +637,7 @@ lemma lemma_candidate_edges
       · left; rfl
       · have h_mem : u_rep ∈ isolated_list := by rw [h_iso]; apply List.mem_cons_self
         rw [h_iso_def] at h_mem
-        rw [Finset.mem_toList, Finset.mem_filter] at h_mem
+        rw [Finset.mem_sort, Finset.mem_filter] at h_mem
         simp only [Finset.mem_univ, true_and] at h_mem
         have h_rep_iso : (G.neighborFinset u_rep).card = 0 := h_mem.1
         have h_rep_ne : u_rep ≠ v1 := h_mem.2.1
@@ -715,7 +658,7 @@ lemma lemma_candidate_edges
       · right; exists u
         constructor
         · rw [h_unused_def]
-          rw [Finset.mem_toList, Finset.mem_filter]
+          rw [Finset.mem_sort, Finset.mem_filter]
           simp only [Finset.mem_univ, true_and]
           have h_deg : (G.neighborFinset u).card ≤ 3 := by
             have h_bound := h_max u
@@ -749,7 +692,6 @@ lemma lemma_candidate_edges
 def transition (S : List (SimpleGraph V)) (v1 : V) (forbidden : List V) : List (SimpleGraph V) :=
   S.flatMap (fun G => generate_next_graphs G v1 forbidden)
 
-/- The main step theorem: If S covers Gamma_prev, then transition S covers Gamma_next. -/
 /- The main step theorem: If S covers Gamma_prev, then transition S covers Gamma_next. -/
 open Classical in
 theorem step_completeness
@@ -1039,7 +981,8 @@ theorem Gamma_4_4_is_complete
 
     let S1_3 := reduce_iso (transition S1_2 v1 [v2, v3, v4]) anchors
     have h1_3 : complete_anchored_enumeration S1_3 (Gamma_1_Step 3 v1 v2 v3 v4) anchors :=
-      step_completeness S1_2 (Gamma_1_Step 2 v1 v2 v3 v4) (Gamma_1_Step 3 v1 v2 v3 v4) v1 [v2, v3, v4] anchors h1_2
+      step_completeness S1_2
+        (Gamma_1_Step 2 v1 v2 v3 v4) (Gamma_1_Step 3 v1 v2 v3 v4) v1 [v2, v3, v4] anchors h1_2
       (by
         intro G hG
         rcases hG with ⟨h_card, h_max, h_deg, h_adj, h_ne⟩
@@ -1048,7 +991,8 @@ theorem Gamma_4_4_is_complete
         rcases step_reverse_lemma G v1 9 2 [v2, v3, v4] h_card h_max h_deg
           (fun u hu => h_extract v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
           (fun u hu =>
-            h_pairwise_extract anchors h_distinct (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
+            h_pairwise_extract anchors h_distinct
+              (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
         have h_prev_adj : List.Pairwise (fun a b => ¬G_prev.Adj a b) [v1, v2, v3, v4] :=
@@ -1145,7 +1089,6 @@ theorem Gamma_4_4_is_complete
       (by intros a ha; simp [anchors] at ha; simp; tauto)
       h_v2_in
       (by intros x hx; simp [anchors] at hx ⊢; rcases hx with rfl | rfl | rfl <;> simp)
-
     let S2_2 := reduce_iso (transition S2_1 v2 [v1, v3, v4]) anchors
     have h2_2 : complete_anchored_enumeration S2_2 (Gamma_2_Step 2 v1 v2 v3 v4) anchors :=
       step_completeness S2_1 (Gamma_2_Step 1 v1 v2 v3 v4) (Gamma_2_Step 2 v1 v2 v3 v4) v2 [v1, v3, v4] anchors h2_1
@@ -1529,8 +1472,10 @@ theorem Gamma_4_4_is_complete
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v4 18 1 [v1, v2, v3] h_card h_max h_d4
           (fun u hu => h_extract v4 h_v4_in u
-            (by simp [anchors] at hu ⊢; tauto) (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
-          (fun u hu => by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43)
+            (by simp [anchors] at hu ⊢; tauto)
+            (by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43))
+          (fun u hu =>
+            by simp [anchors] at hu; rcases hu with rfl | rfl | rfl; exact h41; exact h42; exact h43)
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
         have h_prev_adj : List.Pairwise (fun a b => ¬G_prev.Adj a b) [v1, v2, v3, v4] :=
