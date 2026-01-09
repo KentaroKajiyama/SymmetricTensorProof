@@ -20,7 +20,7 @@ namespace AdjMat
 
 /- Helper for index calculation: row * n + col -/
 @[inline]
-private def idx {n} (_g : AdjMat n) (u v : Fin n) : Nat :=
+def idx {n} (_g : AdjMat n) (u v : Fin n) : Nat :=
   u.val * n + v.val
 
 /-
@@ -82,6 +82,64 @@ def set {n} (g : AdjMat n) (u v : Fin n) (b : Bool) : AdjMat n :=
   else
     g
 
+-- fillZero が既存のデータの値を変更せず、新しい領域を 0 で埋めることの証明は少し手間がかかるため、
+-- ここでは「空からスタートした場合」に特化した証明を書きます。
+
+theorem get_fillZero_eq_zero {n : Nat} (i : Nat) (h : i < n) :
+    (fillZero ByteArray.empty n).get i (by simp; exact h) = 0 := by
+  let ba := ByteArray.empty
+  -- 述語 p: 「配列の中身がすべて 0 である」
+  -- これは i に依存しない、配列そのものの性質です
+  let p (arr : ByteArray) := ∀ j (hj : j < arr.size), arr.get j hj = 0
+  -- 補題: 任意の回数 k だけ fillZero しても、p という性質は保たれる
+  -- 【重要】ここで i や h は一切登場させません
+  have step (k : Nat) : ∀ arr, p arr → p (fillZero arr k) := by
+    induction k with
+    | zero =>
+      -- ベースケース: 0回追加ならそのまま
+      intros arr h_arr
+      simp [fillZero]
+      exact h_arr
+    | succ k ih =>
+      -- ステップ: k+1回追加する場合
+      intros arr h_arr
+      simp [fillZero]
+      -- 帰納法の仮定 ih を適用する。
+      -- ここでのゴールは p (fillZero (arr.push 0) k)
+      -- ih の型は ∀ arr, p arr → p (fillZero arr k) なので、
+      -- arr を (arr.push 0) に置き換えて適用できる。
+      apply ih
+      -- あとは p (arr.push 0) が成り立つこと、
+      -- つまり「全部0の配列に0を足しても全部0」を示せばよい
+      intro j hj
+      let hj' := hj
+      rw [ByteArray.size_push] at hj
+      -- j が既存範囲か、新規追加位置かで分岐
+      if h_lt : j < arr.size then
+        -- 既存範囲: 元の配列の値を参照 (h_arr より 0)
+        have : ((arr.push 0).get j hj' = 0) = ((arr.push 0)[j]'hj' = 0) := by
+          simp [getElem]
+        simp [this, ByteArray.get_push_lt _ _ _ h_lt]
+        exact h_arr j h_lt
+      else
+        -- 新規位置: j = arr.size なので、push された 0 を参照
+        have h_eq : j = arr.size := by omega
+        subst h_eq
+        have : ((arr.push 0).get arr.size hj' = 0) = ((arr.push 0)[arr.size]'hj' = 0) := by
+          simp [getElem]
+        simp [this, ByteArray.get_push_eq]
+        -- push 0 したので当然 0
+
+  -- 初期状態 (empty) は自明に p を満たす (要素がないため)
+  have h_base : p ba := by
+    intro j hj
+    simp [ba] at hj -- empty.size は 0 なので、j < 0 は矛盾
+
+  -- n回 fillZero した結果も p を満たす
+  have h_all_zero := step n ba h_base
+  -- 最後に、特定のインデックス i について適用する
+  exact h_all_zero i _
+
 /- Add an edge between u and v (symmetric). -/
 @[inline]
 def add_edge {n} (g : AdjMat n) (u v : Fin n) : AdjMat n :=
@@ -92,7 +150,7 @@ def add_edge {n} (g : AdjMat n) (u v : Fin n) : AdjMat n :=
   Calculate the degree of a vertex u.
   Optimized to loop over the specific row slice in the ByteArray.
 -/
-def degree {n} (g : AdjMat n) (u : Fin n) : Nat :=
+def degree_old {n} (g : AdjMat n) (u : Fin n) : Nat :=
   let start := u.val * n
   let stop := start + n
   -- Tail-recursive loop to avoid allocation
@@ -107,6 +165,82 @@ def degree {n} (g : AdjMat n) (u : Fin n) : Nat :=
     else
       count
   loop start 0
+
+/-
+  【部品定義】: loopRange
+  0 から n-1 までループする汎用関数です。
+  @[inline] が付いているため、コンパイル時には呼び出し元の関数に展開され、
+  手書きのループと全く同じコードになります。
+-/
+@[inline]
+def loopRange {α} (n : Nat) (f : Nat → α → α) (init : α) : α :=
+  let rec @[specialize] go (i : Nat) (acc : α) : α :=
+    if h : i < n then
+      go (i + 1) (f i acc)
+    else
+      acc
+  go 0 init
+
+/-
+  【証明用ブリッジ】
+  「このループは、論理的にはリストの foldl と同じだよ」と Lean に教える定理。
+  これを一度証明しておけば、以後の証明でループの中身を気にする必要がなくなります。
+-/
+theorem loopRange_eq_foldl {n : Nat} {α} {f : Nat → α → α} {init : α} :
+    loopRange n f init = (List.range n).foldl (fun acc i => f i acc) init := by
+  rw [loopRange, List.range_eq_range']
+  let go := loopRange.go n f
+  -- 汎化: 任意の i と acc について証明する
+  have h_go (i : Nat) (acc : α) :
+    go i acc = (List.range' i (n - i) 1).foldl (fun acc i => f i acc) acc := by
+    -- 【重要】n - i を k と置き、h : n - i = k という等式を保持する
+    generalize h : n - i = k
+    induction k generalizing i acc with
+    | zero =>
+      unfold go
+      -- [Zeroの場合] n - i = 0 なので、i >= n。つまり i < n は False。
+      have : ¬ (i < n) := by
+        intro h_lt
+        -- もし i < n なら n - i > 0 なので矛盾
+        have : n - i > 0 := Nat.zero_lt_sub_of_lt h_lt
+        omega
+      simp
+      -- List.range' i 0 ... は空リストなので、foldl は acc を返す
+      rw [loopRange.go]
+      simp [this]
+    | succ k ih =>
+      unfold go
+      -- [Succの場合] n - i = k + 1 なので、n > i (つまり i < n)
+      have h_lt : i < n := Nat.lt_of_sub_eq_succ h
+      -- 1. 左辺: ループの定義を展開。i < n なので if の then 節 (再帰) に入る
+      rw [loopRange.go]
+      simp [h_lt]
+      -- 2. 右辺: List.range' i (k + 1) を i :: List.range' (i + 1) k に分解して foldl を1回進める
+      rw [List.range'_succ]
+      simp
+      -- 3. 帰納法の仮定 (ih) を適用するための準備
+      -- IH を使うには「n - (i + 1) = k」であることを示す必要がある
+      have h_idx : n - (i + 1) = k := by
+        omega -- または rw [Nat.sub_add_eq, h, Nat.add_sub_cancel]
+      -- 4. 帰納法の仮定を適用
+      exact ih (i + 1) (f i acc) h_idx
+  -- 最後に i = 0 を代入して完了
+  simpa using h_go 0 init
+
+/-
+  【本番】: degree
+  ByteArray を loopRange で走査します。
+-/
+def degree {n} (g : AdjMat n) (u : Fin n) : Nat :=
+  let start := u.val * n
+  -- loopRange を呼び出すだけ。
+  -- コンパイルされると、start, start+1, ... とインクリメントする while ループになります。
+  loopRange n (fun i count =>
+    let real_idx := start + i
+    -- get! は実行時の境界チェックだけ行い、証明義務を発生させません。
+    -- (証明時には「論理的に正しい get」と等価であることを示します)
+    if g.data.get! real_idx != 0 then count + 1 else count
+  ) 0
 
 /-
   Conversion to Reference Implementation (for Correctness proofs).
@@ -160,30 +294,31 @@ def get_unused {n} (g : AdjMat n) (v1 : Fin n) (forbidden : Array (Fin n)) : Arr
 def generate_next_graphs {n}
   (g : AdjMat n) (v1 : Fin n) (forbidden : Array (Fin n)) : Array (AdjMat n) :=
   let isolated := get_isolated g v1 forbidden
+  -- 1. まず未使用点のグラフ列を生成 (これは常に必要)
+  let unused_graphs := (get_unused g v1 forbidden).map (fun v => g.add_edge v1 v)
   if h : isolated.size > 0 then
-    -- Optimization: If isolated vertices exist, pick ONLY the first one.
+    -- Optimization: 孤立点がある場合、"先頭の1つ" だけを採用して候補に追加
+    -- (残りの孤立点は対称性により同型になるのでカットして良い)
     let v := isolated[0]'h
-    #[g.add_edge v1 v]
+    let iso_graph := g.add_edge v1 v
+    -- 配列の先頭に追加 (Listの h :: unused と順序を合わせるため)
+    #[iso_graph] ++ unused_graphs
   else
-    -- Otherwise, try all unused vertices.
-    let unused := get_unused g v1 forbidden
-    unused.map (fun v => g.add_edge v1 v)
+    -- 孤立点がない場合は unused_graphs のみ
+    unused_graphs
 
 def transition {n}
   (S : Array (AdjMat n)) (v1 : Fin n) (forbidden : Array (Fin n)) : Array (AdjMat n) :=
-  S.foldl (fun acc g =>
-    let nexts := generate_next_graphs g v1 forbidden
-    acc ++ nexts
-  ) #[]
+  S.flatMap (fun g => generate_next_graphs g v1 forbidden)
 
 -- Placeholder for Isomorphism Reduction (computationally heaviest part)
 opaque reduce_iso {n} (S : Array (AdjMat n)) (anchors : Array (Fin n)) : Array (AdjMat n)
 
-def enumerate_Gamma_4_4 (n : Nat) (v_list : List (Fin n)) : Array (AdjMat n) :=
+def enumerate_Gamma_4_4
+  (n : Nat) (v_list : List (Fin n)) (S0 : Array (AdjMat n)) : Array (AdjMat n) :=
   match v_list with
   | [v1, v2, v3, v4] =>
     -- Base case: Empty graph
-    let S0 := #[AdjMat.empty n]
     let all_anchors := #[v1, v2, v3, v4]
     let forbidden_for (v : Fin n) := all_anchors.filter (· != v)
     -- Gamma_1 steps (Add 3 edges to v1)

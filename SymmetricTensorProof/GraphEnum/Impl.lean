@@ -167,11 +167,12 @@ opaque reduce_iso {n} (S : List (AdjMat n)) (anchors : List (Fin n)) : List (Adj
     'forbidden' is used to prevent connecting to other anchors during this phase,
     ensuring we are selecting "anonymous" vertices from the pool.
 -/
-def enumerate_Gamma_4_4 (n : Nat) (v_list : List (Fin n)) : List (AdjMat n) :=
+def enumerate_Gamma_4_4
+  (n : Nat) (v_list : List (Fin n)) (S_0_0 : List (AdjMat n)) : List (AdjMat n) :=
   match v_list with
   | [v1, v2, v3, v4] =>
     -- Base case: Empty graph
-    let S0 := [AdjMat.empty n]
+    let S0 := S_0_0
     let all_anchors := [v1, v2, v3, v4]
     -- Helper to get forbidden list for a current anchor (exclude itself)
     -- Assuming we want to avoid connecting to other anchors to prioritize "cloud" vertices
