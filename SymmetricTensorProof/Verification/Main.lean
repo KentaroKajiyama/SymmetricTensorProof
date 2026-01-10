@@ -1,4 +1,4 @@
-import SymmetricTensorProof.check
+import SymmetricTensorProof.Verification.check
 import Mathlib.Data.String.Basic
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.Sym.Sym2

@@ -1,3 +1,0 @@
-error: [root]: no configuration file with a supported extension:
-C:\Users\jesus\OneDrive\Documents\VScode\Repositories\research\SymmetricTensorProof\SymmetricTensorProof\lakefile.lean
-C:\Users\jesus\OneDrive\Documents\VScode\Repositories\research\SymmetricTensorProof\SymmetricTensorProof\lakefile.toml
