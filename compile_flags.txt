@@ -1,0 +1,12 @@
+-IC:\Users\jesus\.elan\toolchains\leanprover--lean4---v4.26.0-rc2\include
+-Inative
+-std=c++14
+--target=x86_64-w64-mingw32
+-xc++
+-D_WIN32
+-DWIN32
+-DAVOID_SYS_WAIT_H
+-IC:/msys64/ucrt64/include/c++/13.2.0
+-IC:/msys64/ucrt64/include/c++/13.2.0/x86_64-w64-mingw32
+-IC:/msys64/ucrt64/include/c++/13.2.0/backward
+-IC:/msys64/ucrt64/include
