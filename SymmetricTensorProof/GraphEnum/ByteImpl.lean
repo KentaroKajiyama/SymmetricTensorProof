@@ -1,5 +1,6 @@
 import Mathlib
 import SymmetricTensorProof.GraphEnum.Impl
+import SymmetricTensorProof.GraphEnum.NautyFFI
 
 namespace GraphEnumeration
 namespace ByteImpl
@@ -312,8 +313,32 @@ def transition {n}
   S.flatMap (fun g => generate_next_graphs g v1 forbidden)
 
 -- Placeholder for Isomorphism Reduction (computationally heaviest part)
-opaque reduce_iso {n} (S : Array (AdjMat n)) (anchors : Array (Fin n)) : Array (AdjMat n)
+-- opaque reduce_iso {n} (S : Array (AdjMat n)) (anchors : Array (Fin n)) : Array (AdjMat n)
 
+-- 実装を与える
+def reduce_iso {n} (S : Array (AdjMat n)) (anchors : Array (Fin n)) : Array (AdjMat n) :=
+  -- 【進捗ログ】 入力サイズを表示
+  -- dbg_trace は純粋関数の中で副作用（表示）を行うための特別な機能です
+  dbg_trace s!"  [Reduce Iso] Input: {S.size} graphs..."
+  -- 1. ByteImpl.AdjMat の配列から、生データの ByteArray 配列を取り出す
+  let rawGraphs : Array ByteArray := S.map (fun g => g.data)
+
+  -- 2. C++ (Nauty) の同型除去関数を呼び出す
+  --    ※ FFI関数は純粋関数として宣言されているので、IOモナドなしで呼べます
+  let uniqueRawGraphs := SymmetricTensorProof.reduceIso n rawGraphs anchors
+
+  -- 【進捗ログ】 削減後のサイズを表示
+  dbg_trace s!"  [Reduce Iso] Done. -> Output: {uniqueRawGraphs.size} graphs."
+
+  -- 3. 結果の ByteArray を再び ByteImpl.AdjMat に包み直す
+  uniqueRawGraphs.map (fun rawData =>
+    { data := rawData,
+      h_size := by
+        sorry
+    }
+  )
+
+/- 所望のグラフ列挙 -/
 def enumerate_Gamma_4_4
   (n : Nat) (v_list : List (Fin n)) (S0 : Array (AdjMat n)) : Array (AdjMat n) :=
   match v_list with
