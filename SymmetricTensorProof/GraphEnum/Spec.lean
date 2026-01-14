@@ -607,7 +607,8 @@ lemma lemma_candidate_edges
         rw [h_neighbors] at h_bound
         rw [Finset.card_union_of_disjoint] at h_bound
         · simp at h_bound
-          simp [h_bound]
+          simp
+          exact Nat.le_of_lt_succ h_bound
         · rw [Finset.disjoint_singleton_right, SimpleGraph.mem_neighborFinset]
           exact fun h => h_not_adj (G.adj_symm h)
       have h_ne_zero : (G.neighborFinset u).card ≠ 0 := by
@@ -680,7 +681,8 @@ lemma lemma_candidate_edges
             rw [h_neighbors] at h_bound
             rw [Finset.card_union_of_disjoint] at h_bound
             · simp at h_bound
-              simp [h_bound]
+              simp
+              exact Nat.le_of_lt_succ h_bound
             · rw [Finset.disjoint_singleton_right, SimpleGraph.mem_neighborFinset]
               exact fun h => h_not_adj (G.adj_symm h)
           have h_ne_zero : (G.neighborFinset u).card ≠ 0 := h_u_iso
@@ -948,7 +950,8 @@ theorem Gamma_4_4_is_complete
         have h_extract := h_pairwise_extract anchors h_adj h_symm
         rcases step_reverse_lemma G v1 8 1 [v2, v3, v4] h_card h_max h_deg
           (fun u hu => h_extract v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
-          (fun u hu => h_pairwise_extract anchors h_distinct (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
+          (fun u hu =>
+            h_pairwise_extract anchors h_distinct (fun _ _ => Ne.symm) v1 h_v1_in u (by simp [anchors, hu]) (by simp; tauto))
           with ⟨G_prev, h_pc, h_pm, h_pd, h_sub, _, u, hu_good, h_recon⟩
         exists G_prev
         have h_prev_adj : List.Pairwise (fun a b => ¬G_prev.Adj a b) [v1, v2, v3, v4] :=

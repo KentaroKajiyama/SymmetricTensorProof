@@ -12,11 +12,11 @@ def rawToImpl {n : Nat} (raw : ByteArray) : ByteImpl.AdjMat n :=
 def main : IO Unit := do
   IO.println "=== Symmetric Tensor Proof Main ==="
 
-  let n_val : Nat := 8
+  let n_val : Nat := 30
   let v_list : List (Fin n_val) := [0, 1, 2, 3].map (fun i => ⟨i, sorry⟩)
 
   -- 1. 読み込み
-  let loadedRaw ← loadGraphs n_val "initial.g6"
+  let loadedRaw ← loadGraphs n_val "anchored_init_padded_5.g6"
   let S0 := loadedRaw.map rawToImpl
   IO.println s!"Initial graphs: {S0.size}"
 

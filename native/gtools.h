@@ -79,9 +79,9 @@ extern "C" {
 extern int errno;
 #endif
 
-#if HAVE_WAIT_H && !defined(AVOID_SYS_WAIT_H)
-#include <sys/wait.h>
-#endif
+// #if HAVE_WAIT_H && !defined(AVOID_SYS_WAIT_H)
+// #include <sys/wait.h>
+// #endif
 
 #if HAVE_PERROR
 #define NAUTY_ABORT(msg) do {if (errno != 0) perror(msg); exit(1);} while(0)
