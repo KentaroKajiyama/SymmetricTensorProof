@@ -22,7 +22,10 @@ lean_lib «SymmetricTensorProof» where
 -- 1. リンク設定 (Linux用)
 ---------------------------------------------------------------------
 def commonLinkArgs : Array String :=
-  #["-lstdc++"] -- C++標準ライブラリをリンク
+  #[
+    "-lstdc++",
+    "-L/home/kajiyama/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib"
+  ] -- C++標準ライブラリをリンク
 
 lean_exe «graph-enum-claim5» where
   root := `SymmetricTensorProof.GraphEnum.Main
