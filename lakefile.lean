@@ -23,7 +23,10 @@ lean_lib «SymmetricTensorProof» where
 ---------------------------------------------------------------------
 -- IndexBuildM の代わりに FetchM を使うか、型推論に任せます
 -- 1. リンク設定を文字列の配列として定義（パスは含めない）
-def commonLinkArgs : Array String := #["-lstdc++"]
+def commonLinkArgs : Array String := #[
+  "-lstdc++",
+  "-static-libstdc++"
+  ]
 
 lean_exe «graph-enum-claim5» where
   root := `SymmetricTensorProof.GraphEnum.Main
