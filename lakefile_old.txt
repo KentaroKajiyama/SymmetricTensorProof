@@ -9,6 +9,7 @@ package SymmetricTensorProof where
     ⟨`weak.linter.mathlibStandardSet, true⟩,
     ⟨`maxSynthPendingDepth, (3 : Nat)⟩
   ]
+  -- Linux用: シンプルな最適化オプションのみ
   moreLeancArgs := #["-O3"]
 
 require mathlib from git
@@ -18,28 +19,26 @@ require mathlib from git
 lean_lib «SymmetricTensorProof» where
 
 ---------------------------------------------------------------------
--- 1. リンク設定 (パスの明示的な指定)
+-- 1. リンク設定 (Linux用)
 ---------------------------------------------------------------------
 def commonLinkArgs : Array String :=
   #[
-    -- 1. システムの C++ ライブラリがある場所を明示的に追加 (Ubuntu 64bit 標準)
-    "-L/usr/lib/x86_64-linux-gnu",
-    -- 2. その上でライブラリを指定
     "-lstdc++",
-    -- 3. Lean ツールチェーンのパス (jesus さん用)
-    "-L/home/jesus/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib",
-    -- 4. 新しい glibc で削除されたシンボルのダミー定義 (これをしないとリンクエラー)
-    "-Wl,--defsym=__libc_csu_init=0",
-    "-Wl,--defsym=__libc_csu_fini=0"
-  ]
+    "-L/home/jesus/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib"
+  ] -- C++標準ライブラリをリンク
 
 lean_exe «graph-enum-claim5» where
   root := `SymmetricTensorProof.GraphEnum.Main
   exeName := "graph-enum-claim5"
   moreLinkArgs := commonLinkArgs
 
+lean_exe «graph-enum-test» where
+  root := `SymmetricTensorProof.GraphEnum.Test
+  exeName := "graph-enum-test"
+  moreLinkArgs := commonLinkArgs
+
 ---------------------------------------------------------------------
--- 2. C++ (Nauty) コンパイル設定 (16.04 の設定を維持)
+-- 2. C++ (Nauty) コンパイル設定
 ---------------------------------------------------------------------
 
 def nautySrcs : Array String := #[
@@ -63,6 +62,8 @@ target glue.o pkg : System.FilePath := do
     "-std=c++14",
     "-fPIC"
   ]
+
+  -- "c++" コマンドを使用 (通常 g++ にリンクされています)
   buildO oFile srcJob weakArgs traceArgs "c++"
 
 extern_lib liblean_glue pkg := do
@@ -82,6 +83,7 @@ extern_lib liblean_glue pkg := do
     let oFile := buildDir / (src ++ ".o")
     let srcFile := srcDir / src
     let srcJob ← inputFile srcFile false
+    -- "cc" コマンドを使用 (通常 gcc にリンクされています)
     let job ← buildO oFile srcJob nautyWeakArgs nautyTraceArgs "cc"
     nautyJobs := nautyJobs.push job
 
