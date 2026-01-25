@@ -10,7 +10,7 @@ package SymmetricTensorProof where
     ⟨`maxSynthPendingDepth, (3 : Nat)⟩
   ]
   -- Linux用: シンプルな最適化オプションのみ
-  moreLeancArgs := #["-O3"]
+  moreLeancArgs := #["-O3", "-lstdc++"]
 
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4.git"
@@ -24,8 +24,7 @@ lean_lib «SymmetricTensorProof» where
 -- IndexBuildM の代わりに FetchM を使うか、型推論に任せます
 -- 1. リンク設定を文字列の配列として定義（パスは含めない）
 def commonLinkArgs : Array String := #[
-  "-lstdc++",
-  "-static-libstdc++"
+  "-lstdc++"
   ]
 
 lean_exe «graph-enum-claim5» where
