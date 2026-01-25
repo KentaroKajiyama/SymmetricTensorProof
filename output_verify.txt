@@ -1,3 +1,0 @@
-SymmetricTensorProof/Main.lean:188:4: warning: declaration uses 'sorry'
-SymmetricTensorProof/Main.lean:188:4: warning: declaration uses 'sorry'
-SymmetricTensorProof/Main.lean:188:4: warning: declaration uses 'sorry'
