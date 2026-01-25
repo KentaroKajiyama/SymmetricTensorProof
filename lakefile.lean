@@ -57,20 +57,16 @@ target glue.o pkg : System.FilePath := do
   let srcJob ← inputFile srcFile false
   let leanIncludeDir ← getLeanIncludeDir
 
-  -- leanc (Lean付属のコンパイラ) のパスを取得
-  let leanc ← getLeanc
-
   let flags := #[
     "-O3",
     "-std=c++14",
     "-fPIC",
     "-I", (pkg.dir / "native").toString,
-    "-I", leanIncludeDir.toString,
-    "-x", "c++"  -- 強制的に C++ としてコンパイル
+    "-I", leanIncludeDir.toString
   ]
 
-  -- leanc を使ってビルド
-  buildO oFile srcJob #[] flags leanc
+  -- 「leanc」ではなく「c++」を使い、システムの C++ ヘッダーを使わせる
+  buildO oFile srcJob #[] flags "c++"
 
 extern_lib liblean_glue pkg := do
   let glueJob ← fetch <| pkg.target ``glue.o
