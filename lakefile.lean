@@ -25,7 +25,10 @@ lean_lib «SymmetricTensorProof» where
 -- 1. リンク設定を文字列の配列として定義（パスは含めない）
 def commonLinkArgs : Array String := #[
   "-L/usr/lib/x86_64-linux-gnu",
-  "-lstdc++"
+  "-lstdc++",
+  -- glibc の不一致を回避するためのマジックフラグ
+  "-Wl,--defsym=__libc_csu_init=0",
+  "-Wl,--defsym=__libc_csu_fini=0"
   ]
 
 lean_exe «graph-enum-claim5» where
@@ -54,19 +57,20 @@ target glue.o pkg : System.FilePath := do
   let srcJob ← inputFile srcFile false
   let leanIncludeDir ← getLeanIncludeDir
 
-  let weakArgs := #[
-    "-I", (pkg.dir / "native").toString,
-    "-I", leanIncludeDir.toString
-  ]
+  -- leanc (Lean付属のコンパイラ) のパスを取得
+  let leanc ← getLeanc
 
-  let traceArgs := #[
+  let flags := #[
     "-O3",
     "-std=c++14",
-    "-fPIC"
+    "-fPIC",
+    "-I", (pkg.dir / "native").toString,
+    "-I", leanIncludeDir.toString,
+    "-x", "c++"  -- 強制的に C++ としてコンパイル
   ]
 
-  -- "c++" コマンドを使用 (通常 g++ にリンクされています)
-  buildO oFile srcJob weakArgs traceArgs "c++"
+  -- leanc を使ってビルド
+  buildO oFile srcJob #[] flags leanc
 
 extern_lib liblean_glue pkg := do
   let glueJob ← fetch <| pkg.target ``glue.o
