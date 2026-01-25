@@ -18,18 +18,19 @@ require mathlib from git
 lean_lib «SymmetricTensorProof» where
 
 ---------------------------------------------------------------------
--- 1. リンク設定 (パスを jesus さん用に修正)
+-- 1. リンク設定 (パスの明示的な指定)
 ---------------------------------------------------------------------
 def commonLinkArgs : Array String :=
   #[
+    -- 1. システムの C++ ライブラリがある場所を明示的に追加 (Ubuntu 64bit 標準)
+    "-L/usr/lib/x86_64-linux-gnu",
+    -- 2. その上でライブラリを指定
     "-lstdc++",
-    -- パスを現在の環境の jesus さんに変更
+    -- 3. Lean ツールチェーンのパス (jesus さん用)
     "-L/home/jesus/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib",
-    -- 以下の2つを追加して、新しいOSでのリンクエラーを回避
+    -- 4. 新しい glibc で削除されたシンボルのダミー定義 (これをしないとリンクエラー)
     "-Wl,--defsym=__libc_csu_init=0",
-    "-Wl,--defsym=__libc_csu_fini=0",
-    -- 強制的に libstdc++ を使うためのフラグ
-    "-stdlib=libstdc++"
+    "-Wl,--defsym=__libc_csu_fini=0"
   ]
 
 lean_exe «graph-enum-claim5» where
