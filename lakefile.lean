@@ -9,8 +9,7 @@ package SymmetricTensorProof where
     ⟨`weak.linter.mathlibStandardSet, true⟩,
     ⟨`maxSynthPendingDepth, (3 : Nat)⟩
   ]
-  -- Linux用: シンプルな最適化オプションのみ
-  moreLeancArgs := #["-O3", "-lstdc++"]
+  moreLeancArgs := #["-O3"]
 
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4.git"
@@ -19,32 +18,27 @@ require mathlib from git
 lean_lib «SymmetricTensorProof» where
 
 ---------------------------------------------------------------------
--- 1. リンク設定 (Linux用)
+-- 1. リンク設定 (パスを jesus さん用に修正)
 ---------------------------------------------------------------------
--- IndexBuildM の代わりに FetchM を使うか、型推論に任せます
--- 1. リンク設定を文字列の配列として定義（パスは含めない）
-def commonLinkArgs : Array String := #[
-  "-fuse-ld=bfd",            -- LLVM lld ではなく GNU リンカを使用
-  "-L/usr/lib/x86_64-linux-gnu",
-  "-lstdc++",
-  -- glibc の不一致を回避するためのマジックフラグ
-  "-Wl,--defsym=__libc_csu_init=0",
-  "-Wl,--defsym=__libc_csu_fini=0"
+def commonLinkArgs : Array String :=
+  #[
+    "-lstdc++",
+    -- パスを現在の環境の jesus さんに変更
+    "-L/home/jesus/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib",
+    -- 以下の2つを追加して、新しいOSでのリンクエラーを回避
+    "-Wl,--defsym=__libc_csu_init=0",
+    "-Wl,--defsym=__libc_csu_fini=0",
+    -- 強制的に libstdc++ を使うためのフラグ
+    "-stdlib=libstdc++"
   ]
 
 lean_exe «graph-enum-claim5» where
   root := `SymmetricTensorProof.GraphEnum.Main
   exeName := "graph-enum-claim5"
-  -- 文字列の配列としてそのまま渡す
-  moreLinkArgs := commonLinkArgs
-
-lean_exe «graph-enum-test» where
-  root := `SymmetricTensorProof.GraphEnum.Test
-  exeName := "graph-enum-test"
   moreLinkArgs := commonLinkArgs
 
 ---------------------------------------------------------------------
--- 2. C++ (Nauty) コンパイル設定
+-- 2. C++ (Nauty) コンパイル設定 (16.04 の設定を維持)
 ---------------------------------------------------------------------
 
 def nautySrcs : Array String := #[
@@ -58,16 +52,17 @@ target glue.o pkg : System.FilePath := do
   let srcJob ← inputFile srcFile false
   let leanIncludeDir ← getLeanIncludeDir
 
-  let flags := #[
-    "-O3",
-    "-std=c++14",
-    "-fPIC",
+  let weakArgs := #[
     "-I", (pkg.dir / "native").toString,
     "-I", leanIncludeDir.toString
   ]
 
-  -- 「leanc」ではなく「c++」を使い、システムの C++ ヘッダーを使わせる
-  buildO oFile srcJob #[] flags "c++"
+  let traceArgs := #[
+    "-O3",
+    "-std=c++14",
+    "-fPIC"
+  ]
+  buildO oFile srcJob weakArgs traceArgs "c++"
 
 extern_lib liblean_glue pkg := do
   let glueJob ← fetch <| pkg.target ``glue.o
@@ -86,7 +81,6 @@ extern_lib liblean_glue pkg := do
     let oFile := buildDir / (src ++ ".o")
     let srcFile := srcDir / src
     let srcJob ← inputFile srcFile false
-    -- "cc" コマンドを使用 (通常 gcc にリンクされています)
     let job ← buildO oFile srcJob nautyWeakArgs nautyTraceArgs "cc"
     nautyJobs := nautyJobs.push job
 
