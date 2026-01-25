@@ -21,15 +21,14 @@ lean_lib «SymmetricTensorProof» where
 ---------------------------------------------------------------------
 -- 1. リンク設定 (Linux用)
 ---------------------------------------------------------------------
-def commonLinkArgs : Array String :=
-  #[
-    "-lstdc++",
-    "-L/home/kajiyama/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib"
-  ] -- C++標準ライブラリをリンク
+-- IndexBuildM の代わりに FetchM を使うか、型推論に任せます
+-- 1. リンク設定を文字列の配列として定義（パスは含めない）
+def commonLinkArgs : Array String := #["-lstdc++"]
 
 lean_exe «graph-enum-claim5» where
   root := `SymmetricTensorProof.GraphEnum.Main
   exeName := "graph-enum-claim5"
+  -- 文字列の配列としてそのまま渡す
   moreLinkArgs := commonLinkArgs
 
 lean_exe «graph-enum-test» where
