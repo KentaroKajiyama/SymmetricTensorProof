@@ -53,7 +53,8 @@ def main (args : List String) : IO Unit := do
     IO.println "Running Support Pipeline (Ensure support_pipeline is defined)"
     if args.length < 5 then
       IO.println "Error: Insufficient arguments for support mode."
-      IO.println "Usage: lake exe main <input_file.g6> support <intermediate_prefix> <output_prefix> <start_index>"
+      IO.println
+        "Usage: lake exe main <input_file.g6> support <intermediate_prefix> <output_prefix> <start_index>"
       return
     let start_index := args[4]!.toNat!
     support_pipeline n_val v_list S0 intermediatePrefix outputPrefix start_index
