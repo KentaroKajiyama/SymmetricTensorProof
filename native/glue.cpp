@@ -12,7 +12,7 @@
 #include <mutex>
 #include <future>
 
-#define MAXN 64
+// #define MAXN 64
 
 // ==========================================================
 // 1. C言語ライブラリ (Nauty) のインクルード
