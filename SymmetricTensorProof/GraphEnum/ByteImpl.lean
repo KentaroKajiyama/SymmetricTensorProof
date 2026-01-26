@@ -723,6 +723,9 @@ def processChunksLoop {n}
     diskAccumulatorUpTo logical_chunks config i
       = splitResultUpTo logical_chunks config i)
   : IO Unit := do
+  let output_path : System.FilePath := output_prefix
+  if let some parent := output_path.parent then
+    IO.FS.createDirAll parent
   if h : i < logical_chunks.size then
     -- 1. 論理的な現在のチャンクを取得 (証明用)
     -- let current_logical_chunk := logical_chunks[i]
@@ -989,6 +992,10 @@ def processChunksLoopForSupport {n}
     diskAccumulatorUpTo logical_chunks config i
       = splitResultUpTo logical_chunks config i)
   : IO Unit := do
+  -- 保存する直前にこれを呼ぶ
+  let output_path : System.FilePath := output_prefix
+  if let some parent := output_path.parent then
+    IO.FS.createDirAll parent
   if h : i < logical_chunks_size then
     -- 1. 論理的な現在のチャンクを取得 (証明用)
     -- let current_logical_chunk := logical_chunks[i]
