@@ -184,6 +184,8 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
     std::vector<std::pair<GraphKey, lean_object*>> all_candidates;
     std::mutex merge_mutex;
     std::atomic<size_t> progress_count(0); // 進捗確認用
+    // 追加のミューテックス（Nauty呼び出し専用）
+    std::mutex nauty_mutex;
 
     auto worker = [&](size_t start_idx, size_t end_idx) {
         // スレッドごとに1回だけワークスペースを確保（ループ内での再確保を防ぐ）
@@ -210,8 +212,14 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
 
             setup_partition(n, fixed_nodes, lab.data(), ptn.data());
 
-            densenauty(g_work_buffer.data(), lab.data(), ptn.data(), orbits.data(), 
-                       &worker_options, &stats, m, n, canonical_g.data());
+            // ★★★ ここからロック ★★★
+            // Nauty は同時に1スレッドしか実行させないようにする
+            {
+                std::lock_guard<std::mutex> guard(nauty_mutex);
+                densenauty(g_work_buffer.data(), lab.data(), ptn.data(), orbits.data(), 
+                        &worker_options, &stats, m, n, canonical_g.data());
+            }
+            // ★★★ ここまでロック ★★★
 
             GraphKey key(canonical_g.begin(), canonical_g.end());
 
