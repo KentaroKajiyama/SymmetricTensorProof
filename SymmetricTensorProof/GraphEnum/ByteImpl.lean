@@ -1012,5 +1012,6 @@ def support_pipeline
   | _ =>
     IO.println "Invalid number of anchors."
     return
+
 end ByteImpl
 end GraphEnumeration
