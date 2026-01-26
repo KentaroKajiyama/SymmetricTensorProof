@@ -7,6 +7,11 @@
 #include <algorithm>
 #include <iostream>
 
+// 並列実行用のヘッダー
+#include <thread>
+#include <mutex>
+#include <future>
+
 #define MAXN 64
 
 // ==========================================================
@@ -37,23 +42,25 @@ using GraphKey = std::vector<graph>;
     - Anchors: 個別に固定する -> ptn = 0 (Singleton Cell)
     - Others:  まとめて1つのグループ -> ptn = 1 (Large Cell)
 */
+// ==========================================================
+// ヘルパー関数: パーティション設定 (std::vector 版)
+// スレッドセーフにするため、Leanオブジェクトではなく int vector を受け取ります
+// ==========================================================
 void setup_partition(
     int n, 
-    b_lean_obj_arg anchors_arr, 
-    std::vector<int>& lab, 
-    std::vector<int>& ptn
+    const std::vector<int>& fixed_nodes, // LeanオブジェクトではなくC++標準型
+    int* lab,                            // Nauty APIに合わせてポインタで受け取る
+    int* ptn
 ) {
-    size_t num_anchors = lean_array_size(anchors_arr);
+    size_t num_anchors = fixed_nodes.size();
     std::vector<bool> is_anchor(n, false);
     
     // 1. アンカーを lab の先頭に配置
     for (size_t i = 0; i < num_anchors; i++) {
-        lean_object* val_obj = lean_array_get_core(anchors_arr, i);
-        int v = (int)lean_unbox(val_obj);
+        int v = fixed_nodes[i];
         
         lab[i] = v;
-        // 【修正】アンカーは「それぞれ別の色」で固定したいので、
-        //  区切りを表す 0 をセットします。
+        // アンカーは「それぞれ別の色（固定）」なので区切る (0)
         ptn[i] = 0; 
         is_anchor[v] = true;
     }
@@ -63,14 +70,13 @@ void setup_partition(
     for (int v = 0; v < n; v++) {
         if (!is_anchor[v]) {
             lab[idx] = v;
-            // 【修正】残りの頂点は「同じ色（互換可能）」にしたいので、
-            //  つながりを表す 1 をセットします。
+            // 残りの頂点は「同じ色（互換可能）」なのでつなげる (1)
             ptn[idx] = 1; 
             idx++;
         }
     }
     
-    // 【修正】最後の頂点は必ず区切り (0) にする
+    // 最後の頂点は必ず区切り (0)
     if (n > 0) {
         ptn[n - 1] = 0;
     }
@@ -136,60 +142,123 @@ lean_obj_res cpp_load_graphs(lean_obj_arg n_obj, lean_obj_arg path_obj, lean_obj
 }
 
 // FFI 2: 同型除去
-lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, b_lean_obj_arg S_arr, b_lean_obj_arg anchors_arr) {
+lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg anchors_arr) {
     int n = (int)lean_unbox(n_obj);
-    int m = SETWORDSNEEDED(n); 
-    
-    // Nauty 初期化チェック
-    // nauty_check(WORDSIZE, m, n, NAUTYVERSIONID); 
-
-    std::vector<graph> g(m * n);
-    std::vector<graph> canong(m * n);
-    std::vector<int> lab(n), ptn(n), orbits(n);
-    
-    static DEFAULTOPTIONS_GRAPH(options);
-    static statsblk stats;
-    options.getcanon = TRUE;
-    options.defaultptn = FALSE;
-    options.digraph = FALSE;
-
-    setup_partition(n, anchors_arr, lab, ptn);
-
-    std::set<GraphKey> unique_set;
-    std::vector<lean_object*> unique_lean_objs;
-
+    int m = SETWORDSNEEDED(n);
     size_t s_size = lean_array_size(S_arr);
 
-    for (size_t i = 0; i < s_size; i++) {
-        lean_object* adj_mat_obj = lean_array_get_core(S_arr, i);
-        uint8_t* raw_bytes = lean_sarray_cptr(adj_mat_obj);
+    // 0. アンカー情報の取得 (ここで Lean配列 → C++ vector に変換)
+    size_t num_anchors = lean_array_size(anchors_arr);
+    std::vector<int> fixed_nodes;
+    fixed_nodes.reserve(num_anchors);
+    for (size_t i = 0; i < num_anchors; i++) {
+        fixed_nodes.push_back((int)lean_unbox(lean_array_uget(anchors_arr, i)));
+    }
 
-        EMPTYGRAPH(g.data(), m, n);
-        for (int u = 0; u < n; u++) {
-            for (int v = u + 1; v < n; v++) {
-                if (raw_bytes[u * n + v]) {
-                    ADDONEEDGE(g.data(), u, v, m);
+    // 1. Leanのデータを C++ 構造体にコピー (スレッドセーフ化)
+    struct RawGraphData {
+        lean_object* original_obj; // 結果用ポインタ
+        std::vector<graph> g;      // Nauty計算用データ
+    };
+
+    std::vector<RawGraphData> input_graphs(s_size);
+
+    for (size_t i = 0; i < s_size; i++) {
+        lean_object* adj_mat_obj = lean_array_uget(S_arr, i);
+        
+        input_graphs[i].original_obj = adj_mat_obj;
+        input_graphs[i].g.resize(m * n);
+        
+        // ByteArray から Nauty graph 形式へ変換
+        lean_object* byte_array_obj = lean_ctor_get(adj_mat_obj, 0); 
+        uint8_t* bytes = lean_sarray_cptr(byte_array_obj);
+        
+        EMPTYGRAPH(input_graphs[i].g.data(), m, n);
+        for (int r = 0; r < n; r++) {
+            for (int c = 0; c < n; c++) {
+                if (bytes[r * n + c] == 1) {
+                    ADDONEEDGE(input_graphs[i].g.data(), r, c, m);
                 }
             }
         }
+    }
 
-        std::vector<int> lab_curr = lab;
-        std::vector<int> ptn_curr = ptn;
+    // 2. 並列処理の準備
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
+
+    std::vector<std::pair<GraphKey, lean_object*>> all_candidates;
+    std::mutex merge_mutex;
+
+    // ワーカー関数の定義
+    auto worker = [&](size_t start_idx, size_t end_idx) {
+        // Nauty 用ワークスペース (スレッドローカル)
+        std::vector<int> lab(n), ptn(n), orbits(n);
+        std::vector<graph> canonical_g(m * n);
+        DEFAULTOPTIONS_GRAPH(options);
+        statsblk stats;
         
-        densenauty(g.data(), lab_curr.data(), ptn_curr.data(), orbits.data(), 
-                    &options, &stats, m, n, canong.data());
+        options.getcanon = TRUE;
+        options.defaultptn = FALSE; 
+        options.digraph = FALSE;
 
-        GraphKey key(canong.begin(), canong.end());
-        if (unique_set.find(key) == unique_set.end()) {
-            unique_set.insert(key);
-            lean_inc(adj_mat_obj);
-            unique_lean_objs.push_back(adj_mat_obj);
+        // ローカル結果保持用
+        std::vector<std::pair<GraphKey, lean_object*>> local_candidates;
+        std::set<GraphKey> local_seen;
+
+        for (size_t i = start_idx; i < end_idx; i++) {
+            std::vector<graph> g_copy = input_graphs[i].g;
+
+            // ★ ここで新しい std::vector 版の setup_partition を呼ぶ
+            setup_partition(n, fixed_nodes, lab.data(), ptn.data());
+
+            densenauty(g_copy.data(), lab.data(), ptn.data(), orbits.data(), 
+                    &options, &stats, m, n, canonical_g.data());
+
+            GraphKey key(canonical_g.begin(), canonical_g.end());
+
+            if (local_seen.find(key) == local_seen.end()) {
+                local_seen.insert(key);
+                local_candidates.push_back({key, input_graphs[i].original_obj});
+            }
+        }
+
+        std::lock_guard<std::mutex> lock(merge_mutex);
+        all_candidates.insert(all_candidates.end(), local_candidates.begin(), local_candidates.end());
+    };
+
+    // 3. スレッド起動
+    std::vector<std::thread> threads;
+    size_t chunk_size = (s_size + num_threads - 1) / num_threads;
+
+    for (unsigned int t = 0; t < num_threads; t++) {
+        size_t start = t * chunk_size;
+        size_t end = std::min(start + chunk_size, s_size);
+        if (start < end) {
+            threads.emplace_back(worker, start, end);
         }
     }
 
-    lean_obj_res result = lean_alloc_array(unique_lean_objs.size(), unique_lean_objs.size());
-    for (size_t i = 0; i < unique_lean_objs.size(); i++) {
-        lean_array_set_core(result, i, unique_lean_objs[i]);
+    for (auto& t : threads) {
+        if (t.joinable()) t.join();
+    }
+
+    // 4. 最終マージ
+    std::set<GraphKey> final_seen;
+    std::vector<lean_object*> unique_objs;
+
+    for (const auto& pair : all_candidates) {
+        if (final_seen.find(pair.first) == final_seen.end()) {
+            final_seen.insert(pair.first);
+            unique_objs.push_back(pair.second);
+        }
+    }
+
+    // 5. 結果の作成
+    lean_obj_res result = lean_alloc_array(unique_objs.size(), unique_objs.size());
+    for (size_t i = 0; i < unique_objs.size(); i++) {
+        lean_inc(unique_objs[i]);
+        lean_array_set_core(result, i, unique_objs[i]);
     }
 
     return result;
