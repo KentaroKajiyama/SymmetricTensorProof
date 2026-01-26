@@ -1023,6 +1023,7 @@ def processChunksLoopForSupport {n}
     IO.FS.createDirAll parent
   if h : i < logical_chunks_size then
     processOneChunk config file_prefix output_prefix i
+
     -- 6. 次のループへ (帰納法のようなもの)
     processChunksLoopForSupport
       config
@@ -1062,6 +1063,21 @@ def support_pipeline
   | _ =>
     IO.println "Invalid number of anchors."
     return
+
+
+-- support_pipeline を書き換えるか、新しいエントリーポイントを作る
+def runSingleChunk
+  (n : Nat) (anchors : List (Fin n))
+  (intermediate_file_prefix : String) (output_file_prefix : String)
+  (chunk_index : Nat) -- ★ ループではなく単一のインデックスを受け取る
+  : IO Unit := do
+  match anchors with
+  | [v1, v2, v3, v4] =>
+      let config : StepConfig n
+        := { anchor := v4, forbidden := #[v1, v2, v3], all_anchors := #[v1, v2, v3, v4]}
+      -- ループ関数ではなく、直接 1回だけ処理を実行する
+      processOneChunk config intermediate_file_prefix output_file_prefix chunk_index
+  | _ => IO.println "Invalid anchors"
 
 end ByteImpl
 end GraphEnumeration

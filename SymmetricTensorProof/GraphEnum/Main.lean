@@ -58,5 +58,14 @@ def main (args : List String) : IO Unit := do
       return
     let start_index := args[4]!.toNat!
     support_pipeline n_val v_list S0 intermediatePrefix outputPrefix start_index
+  | "single" =>
+    IO.println "Running Single Chunk Mode"
+    if args.length < 5 then
+      IO.println "Error: Insufficient arguments for single mode."
+      IO.println
+        "Usage: lake exe main <input_file.g6> single <intermediate_prefix> <output_prefix> <chunk_index>"
+      return
+    let start_index := args[4]!.toNat!
+    runSingleChunk n_val v_list intermediatePrefix outputPrefix start_index
   | _ =>
     IO.println s!"Error: Unknown mode '{mode}'. Please specify 4, 5, or 6."
