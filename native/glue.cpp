@@ -12,7 +12,7 @@
 #include <mutex>
 #include <future>
 
-#define MAXN 64
+// #define MAXN 64
 
 // ==========================================================
 // 1. C言語ライブラリ (Nauty) のインクルード
@@ -214,11 +214,11 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
 
             // ★★★ ここからロック ★★★
             // Nauty は同時に1スレッドしか実行させないようにする
-            {
-                std::lock_guard<std::mutex> guard(nauty_mutex);
-                densenauty(g_work_buffer.data(), lab.data(), ptn.data(), orbits.data(), 
-                        &worker_options, &stats, m, n, canonical_g.data());
-            }
+            // {
+            //     std::lock_guard<std::mutex> guard(nauty_mutex);
+            densenauty(g_work_buffer.data(), lab.data(), ptn.data(), orbits.data(), 
+                    &worker_options, &stats, m, n, canonical_g.data());
+            // }
             // ★★★ ここまでロック ★★★
 
             GraphKey key(canonical_g.begin(), canonical_g.end());
