@@ -155,82 +155,81 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
         fixed_nodes.push_back((int)lean_unbox(lean_array_uget(anchors_arr, i)));
     }
 
-    // 1. Leanのデータを C++ 構造体にコピー (スレッドセーフ化)
-    struct RawGraphData {
-        lean_object* original_obj; // 結果用ポインタ
-        std::vector<graph> g;      // Nauty計算用データ
-    };
-
-    std::vector<RawGraphData> input_graphs(s_size);
+    // 1. 全グラフのデータを一つの大きなベクターにまとめてコピー (アロケーション回数を1回にする)
+    // 各グラフ m*n 個の graph 型データを持つ
+    std::vector<graph> all_graphs_data(s_size * m * n, 0);
+    std::vector<lean_object*> original_objs(s_size);
 
     for (size_t i = 0; i < s_size; i++) {
         lean_object* adj_mat_obj = lean_array_uget(S_arr, i);
-        
-        input_graphs[i].original_obj = adj_mat_obj;
-        // 1. サイズを確実に m * n 確保
-        input_graphs[i].g.assign(m * n, 0); 
+        original_objs[i] = adj_mat_obj;
         
         uint8_t* bytes = lean_sarray_cptr(adj_mat_obj);
-        graph* g_ptr = input_graphs[i].g.data();
-
-        // 2. EMPTYGRAPH 相当の初期化（念のため手動でクリア）
-        for (int j = 0; j < m * n; j++) g_ptr[j] = 0;
+        graph* g_ptr = &all_graphs_data[i * m * n];
 
         for (int r = 0; r < n; r++) {
-            // r行目の先頭ポインタを取得
             graph* row_ptr = GRAPHROW(g_ptr, r, m);
             for (int c = 0; c < n; c++) {
-                // 対角成分以外かつ、バイトが 1 の場合のみエッジを追加
                 if (r != c && bytes[r * n + c] == 1) {
-                    // ADDONEEDGE マクロを安全に使用、または直接ビット操作
                     ADDELEMENT(row_ptr, c); 
                 }
             }
         }
     }
 
-    // 2. 並列処理の準備
+    // 2. 並列処理
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4;
 
     std::vector<std::pair<GraphKey, lean_object*>> all_candidates;
     std::mutex merge_mutex;
+    std::atomic<size_t> progress_count(0); // 進捗確認用
 
-    // ワーカー関数の定義
     auto worker = [&](size_t start_idx, size_t end_idx) {
-        // Nauty 用ワークスペース (スレッドローカル)
+        // スレッドごとに1回だけワークスペースを確保（ループ内での再確保を防ぐ）
         std::vector<int> lab(n), ptn(n), orbits(n);
         std::vector<graph> canonical_g(m * n);
-        DEFAULTOPTIONS_GRAPH(options);
-        statsblk stats;
+        std::vector<graph> g_work_buffer(m * n); // コピー用のバッファ
         
-        options.getcanon = TRUE;
-        options.defaultptn = FALSE; 
-        options.digraph = FALSE;
-
-        // ローカル結果保持用
+        // ローカル結果保持
         std::vector<std::pair<GraphKey, lean_object*>> local_candidates;
         std::set<GraphKey> local_seen;
 
         for (size_t i = start_idx; i < end_idx; i++) {
-            std::vector<graph> g_copy = input_graphs[i].g;
+            // Nautyは入力を破壊することがあるため、ワークバッファにコピー
+            std::copy(all_graphs_data.begin() + (i * m * n), 
+                      all_graphs_data.begin() + ((i + 1) * m * n), 
+                      g_work_buffer.begin());
 
-            // ★ ここで新しい std::vector 版の setup_partition を呼ぶ
+            // 毎ループ options を初期化 (スレッドセーフを確実に)
+            DEFAULTOPTIONS_GRAPH(worker_options);
+            statsblk stats;
+            worker_options.getcanon = TRUE;
+            worker_options.defaultptn = FALSE;
+            worker_options.digraph = FALSE;
+
             setup_partition(n, fixed_nodes, lab.data(), ptn.data());
 
-            densenauty(g_copy.data(), lab.data(), ptn.data(), orbits.data(), 
-                    &options, &stats, m, n, canonical_g.data());
+            densenauty(g_work_buffer.data(), lab.data(), ptn.data(), orbits.data(), 
+                       &worker_options, &stats, m, n, canonical_g.data());
 
             GraphKey key(canonical_g.begin(), canonical_g.end());
 
             if (local_seen.find(key) == local_seen.end()) {
                 local_seen.insert(key);
-                local_candidates.push_back({key, input_graphs[i].original_obj});
+                local_candidates.push_back({std::move(key), original_objs[i]});
+            }
+            
+            // 100件ごとに進捗をカウント
+            if (++progress_count % 100 == 0) {
+                // 必要ならここでログ出力
             }
         }
 
         std::lock_guard<std::mutex> lock(merge_mutex);
-        all_candidates.insert(all_candidates.end(), local_candidates.begin(), local_candidates.end());
+        all_candidates.insert(all_candidates.end(), 
+                              std::make_move_iterator(local_candidates.begin()), 
+                              std::make_move_iterator(local_candidates.end()));
     };
 
     // 3. スレッド起動
