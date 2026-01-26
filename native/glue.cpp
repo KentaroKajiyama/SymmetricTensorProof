@@ -212,14 +212,8 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
 
             setup_partition(n, fixed_nodes, lab.data(), ptn.data());
 
-            // ★★★ ここからロック ★★★
-            // Nauty は同時に1スレッドしか実行させないようにする
-            {
-                std::lock_guard<std::mutex> guard(nauty_mutex);
-                densenauty(g_work_buffer.data(), lab.data(), ptn.data(), orbits.data(), 
-                        &worker_options, &stats, m, n, canonical_g.data());
-            }
-            // ★★★ ここまでロック ★★★
+            densenauty(g_work_buffer.data(), lab.data(), ptn.data(), orbits.data(), 
+                    &worker_options, &stats, m, n, canonical_g.data());
 
             GraphKey key(canonical_g.begin(), canonical_g.end());
 
@@ -228,12 +222,15 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
                 local_candidates.push_back({std::move(key), original_objs[i]});
             }
             
-            // 100件ごとに進捗をカウント
-            if (++progress_count % 100 == 0) {
-                // 必要ならここでログ出力
-            }
+            // // 100件ごとに進捗をカウント
+            // if (++progress_count % 100 == 0) {
+            //     // 必要ならここでログ出力
+            // }
+            
         }
-
+        // ★★★ 【追加】このスレッド用のNautyメモリを解放 ★★★
+        nauty_freedyn();
+        // マージ処理
         std::lock_guard<std::mutex> lock(merge_mutex);
         all_candidates.insert(all_candidates.end(), 
                               std::make_move_iterator(local_candidates.begin()), 

@@ -41,16 +41,30 @@ it is necessary to check they are correct.
 #ifndef USE_TLS
 
 #endif
-#ifdef USE_TLS
-#if !TLS_SUPPORTED
- #error "TLS is requested but not available"
-#else
-#define TLS_ATTR _Thread_local
+/* ============================================================
+   Forced TLS Configuration for Lean 4 FFI Parallelization
+   configure スクリプトを使わずに強制的にスレッドセーフにします
+   ============================================================ */
 #define HAVE_TLS 1
-#endif
+
+#if defined(__cplusplus)
+  /* C++ (glue.cpp) から呼ばれるときは C++11 の機能を使う */
+  #define TLS_ATTR thread_local
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+  /* C11 対応コンパイラ (nauty.c) のときは C標準機能を使う */
+  #define TLS_ATTR _Thread_local
+#elif defined(__GNUC__)
+  /* GCC/Clang の拡張機能 (古いCコンパイラ用) */
+  #define TLS_ATTR __thread
+#elif defined(_MSC_VER)
+  /* Windows Visual Studio 用 */
+  #define TLS_ATTR __declspec(thread)
 #else
-#define TLS_ATTR
-#define HAVE_TLS 0
+  /* どうしても対応できない場合（警告を出す） */
+  #warning "Thread Local Storage is not supported by this compiler."
+  #define TLS_ATTR
+  #undef HAVE_TLS
+  #define HAVE_TLS 0
 #endif
 
 /* Function noreturn attribute, if any */
