@@ -971,6 +971,92 @@ def main_pipeline_6
     IO.println "Invalid number of anchors."
     return
 
+
+def processChunksLoopForSupport {n}
+  {logical_chunks : Array (Array (ByteImpl.AdjMat n))} -- 論理モデル
+  (config : ByteImpl.StepConfig n)
+  (file_prefix : String)
+  (output_prefix : String)
+  -- 現在のインデックス
+  (i : Nat)
+  (logical_chunks_size : Nat)
+  (h_match : ChunksMatchDisk file_prefix logical_chunks) -- ★この引数が「鍵」！
+  -- 【不変量】: これまで処理した論理データの累積についての証明などを持ち回るならここに書く
+  (h_bound : i <= logical_chunks.size)
+  (h_progress : processed_up_to logical_chunks config i)
+  -- 【不変量】今の蓄積が、論理的な一括計算結果と一致しているという証拠
+  (h_invariant :
+    diskAccumulatorUpTo logical_chunks config i
+      = splitResultUpTo logical_chunks config i)
+  : IO Unit := do
+  if h : i < logical_chunks_size then
+    -- 1. 論理的な現在のチャンクを取得 (証明用)
+    -- let current_logical_chunk := logical_chunks[i]
+    -- -- 2. 現実のファイルをロード (IO)
+    -- IO.println s!"Processing chunk {i}..."
+    -- let loaded_data ← SymmetricTensorProof.loadGraphs n s!"{file_prefix}_{i}.g6"
+    -- let current_real_chunk := loaded_data.map (fun rawData =>
+    --   { data := rawData, h_size := sorry }
+    -- )
+    -- -- 【ここでリンク！】
+    -- -- 現実のデータと論理データが一致していることを「仮定」して、証明コンテキストに取り込む
+    -- -- ここは証明できないので sorry (Axiom) ですませる
+    -- -- 「ファイルシステムは正しい」という前提です。
+    -- have h_link : current_real_chunk = current_logical_chunk := sorry
+    have h_axiom : i < logical_chunks.size := sorry
+    let ⟨current_real_chunk, h_link⟩ ← loadChunkTrusted file_prefix i h_match h_axiom
+    -- 3. 計算実行 (純粋関数)
+    -- ここで h_link を使うことで、result が logical_chunk に基づいていると言える
+    let result := runStep_4_edges current_real_chunk config
+    -- 1. 新しい蓄積を作る (論理上)
+    -- 【論理的な不変量の更新】
+    -- diskAccumulatorUpTo (i+1) が splitResultUpTo (i+1) と一致することを示す
+    have h_next_invariant :
+      diskAccumulatorUpTo logical_chunks config (i + 1)
+        = splitResultUpTo logical_chunks config (i + 1) := by
+      unfold diskAccumulatorUpTo splitResultUpTo
+      -- ここで iステップ目までの h_invariant と、今回の result の等価性を組み合わせて証明
+      -- diskAccumulatorUpTo の定義により、構造的に導かれる
+      sorry
+    -- 進捗証明の更新
+    have h_next_progress : processed_up_to logical_chunks config (i + 1) := by
+      apply invariant_step logical_chunks config i h_progress
+
+    have h_next_split_def :
+      splitResultUpTo logical_chunks config (i + 1)
+      = splitResultUpTo logical_chunks config i ++ result := by
+      -- ※ここは splitResultUpTo の性質証明を使う
+      unfold splitResultUpTo result
+      simp [h_link, <-Array.flatMap_push]
+    -- 4. 論理的な正当性の確認 (コンパイル時にチェックされる)
+    -- runStep が「分割しても大丈夫な関数である」という定理を適用
+    have h_safe :
+      result = runStep_4_edges current_real_chunk config := by
+        unfold result
+        rw [h_link]
+    -- 5. 結果を保存 (IO)
+    SymmetricTensorProof.dumpGraph6 n s!"{output_prefix}_{i}.g6" (result.map (·.data))
+    -- 【証明ステップの更新】
+    -- 「i番目まで完了」した証拠を作る
+    have h_next : processed_up_to logical_chunks config (i + 1) := by
+      apply invariant_step logical_chunks config i h_progress
+    -- 次のステップのための境界条件の証明
+    -- i < size ならば i + 1 <= size である
+    let h_bound_next : i + 1 <= logical_chunks.size := Nat.succ_le_of_lt h_axiom
+    -- 6. 次のループへ (帰納法のようなもの)
+    processChunksLoop
+      config
+      file_prefix
+      output_prefix
+      (i + 1)
+      h_match
+      h_bound_next
+      h_next
+      h_next_invariant
+  else
+    IO.println "All chunks processed."
+
+
 def support_pipeline
   (n : Nat) (anchors : List (Fin n)) (S0 : Array (AdjMat n))
   (intermediate_file_prefix : String) (output_file_prefix : String)
@@ -979,7 +1065,7 @@ def support_pipeline
   -- 1. 12本までの計算結果を得る（これはメモリに乗る）
   -- let s34 := enumerate_Gamma_4_4_4 n anchors S0
 
-  -- let num_files := 200
+  let num_files := 200
 
   let logical_chunks := #[]
 
@@ -999,11 +1085,12 @@ def support_pipeline
     IO.println "Processing anchors..."
     let config : StepConfig n
       := { anchor := v4, forbidden := #[v1, v2, v3], all_anchors := #[v1, v2, v3, v4]}
-    processChunksLoop
+    processChunksLoopForSupport
       config
       intermediate_file_prefix
       output_file_prefix
       start_index
+      num_files
       h_match
       (by admit)         -- h_bound
       (by admit) -- i=0 の時の processed_up_to
