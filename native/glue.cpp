@@ -170,8 +170,7 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
         input_graphs[i].g.resize(m * n);
         
         // ByteArray から Nauty graph 形式へ変換
-        lean_object* byte_array_obj = lean_ctor_get(adj_mat_obj, 0); 
-        uint8_t* bytes = lean_sarray_cptr(byte_array_obj);
+        uint8_t* bytes = lean_sarray_cptr(adj_mat_obj);
         
         EMPTYGRAPH(input_graphs[i].g.data(), m, n);
         for (int r = 0; r < n; r++) {
