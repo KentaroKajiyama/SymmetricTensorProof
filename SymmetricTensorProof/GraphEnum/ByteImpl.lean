@@ -558,13 +558,13 @@ def splitIntoChunks {α} (arr : Array α) (numChunks : Nat) : Array (Array α) :
 def saveCheckpoints {n}
   (chunks : Array (Array (AdjMat n))) (file_prefix : String)
   : IO Unit := do
-
   -- 1. ファイルプレフィックスから親ディレクトリを取得して作成
-  let path := FilePath.mk file_prefix
+  -- 1. String から System.FilePath に変換
+  let path : System.FilePath := file_prefix
+  -- 2. 親ディレクトリを取得して作成
   if let some parentDir := path.parent then
-    -- "mkdir -p" に相当（既に存在してもエラーにならない）
+    -- IO.FS.createDirAll は String ではなく FilePath を受け取ります
     IO.FS.createDirAll parentDir
-
   IO.println s!"Splitting {chunks.size} graphs into {chunks.size} files..."
   for h : i in [0 : chunks.size] do
     let chunk := chunks[i]
