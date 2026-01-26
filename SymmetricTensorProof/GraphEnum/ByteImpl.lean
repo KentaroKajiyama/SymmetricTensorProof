@@ -1010,21 +1010,12 @@ def processOneChunk {n}
     return ()
 
 def processChunksLoopForSupport {n}
-  {logical_chunks : Array (Array (ByteImpl.AdjMat n))} -- 論理モデル
   (config : ByteImpl.StepConfig n)
   (file_prefix : String)
   (output_prefix : String)
   -- 現在のインデックス
   (i : Nat)
   (logical_chunks_size : Nat)
-  (h_match : ChunksMatchDisk file_prefix logical_chunks) -- ★この引数が「鍵」！
-  -- 【不変量】: これまで処理した論理データの累積についての証明などを持ち回るならここに書く
-  (h_bound : i <= logical_chunks.size)
-  (h_progress : processed_up_to logical_chunks config i)
-  -- 【不変量】今の蓄積が、論理的な一括計算結果と一致しているという証拠
-  (h_invariant :
-    diskAccumulatorUpTo logical_chunks config i
-      = splitResultUpTo logical_chunks config i)
   : IO Unit := do
   -- 保存する直前にこれを呼ぶ
   let output_path : System.FilePath := output_prefix
@@ -1032,13 +1023,6 @@ def processChunksLoopForSupport {n}
     IO.FS.createDirAll parent
   if h : i < logical_chunks_size then
     processOneChunk config file_prefix output_prefix i
-    -- 【証明ステップの更新】
-    -- 「i番目まで完了」した証拠を作る
-    have h_next : processed_up_to logical_chunks config (i + 1) := by
-      apply invariant_step logical_chunks config i h_progress
-    -- 次のステップのための境界条件の証明
-    -- i < size ならば i + 1 <= size である
-    let h_bound_next : i + 1 <= logical_chunks.size := by admit
     -- 6. 次のループへ (帰納法のようなもの)
     processChunksLoopForSupport
       config
@@ -1046,10 +1030,6 @@ def processChunksLoopForSupport {n}
       output_prefix
       (i + 1)
       logical_chunks_size
-      h_match
-      h_bound_next
-      h_next
-      (by admit)
   else
     IO.println "All chunks processed."
 
@@ -1063,16 +1043,6 @@ def support_pipeline
   -- let s34 := enumerate_Gamma_4_4_4 n anchors S0
 
   let num_files := 200
-
-  let logical_chunks := #[]
-
-  -- -- 2. 分割して保存（ここで一時的にメモリを食う）
-  -- saveCheckpoints logical_chunks intermediate_file_prefix
-
-  -- 2. 「保存したから正しい」という証拠を作成
-  -- この時点では論理データへの参照があるが、h_match 自体は Prop なので軽量
-  let h_match : ChunksMatchDisk intermediate_file_prefix logical_chunks :=
-    { size_eq := sorry } -- 実装に合わせて埋める
 
   match anchors with
   | [] =>
@@ -1088,10 +1058,6 @@ def support_pipeline
       output_file_prefix
       start_index
       num_files
-      h_match
-      (by admit)         -- h_bound
-      (by admit) -- i=0 の時の processed_up_to
-      (rfl)                   -- h_invariant: i=0 の時は空 = 空 なので rfl で通る
 
   | _ =>
     IO.println "Invalid number of anchors."
