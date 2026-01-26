@@ -167,16 +167,23 @@ lean_obj_res cpp_reduce_iso(lean_obj_arg n_obj, lean_obj_arg S_arr, lean_obj_arg
         lean_object* adj_mat_obj = lean_array_uget(S_arr, i);
         
         input_graphs[i].original_obj = adj_mat_obj;
-        input_graphs[i].g.resize(m * n);
+        // 1. サイズを確実に m * n 確保
+        input_graphs[i].g.assign(m * n, 0); 
         
-        // ByteArray から Nauty graph 形式へ変換
         uint8_t* bytes = lean_sarray_cptr(adj_mat_obj);
-        
-        EMPTYGRAPH(input_graphs[i].g.data(), m, n);
+        graph* g_ptr = input_graphs[i].g.data();
+
+        // 2. EMPTYGRAPH 相当の初期化（念のため手動でクリア）
+        for (int j = 0; j < m * n; j++) g_ptr[j] = 0;
+
         for (int r = 0; r < n; r++) {
+            // r行目の先頭ポインタを取得
+            graph* row_ptr = GRAPHROW(g_ptr, r, m);
             for (int c = 0; c < n; c++) {
-                if (bytes[r * n + c] == 1) {
-                    ADDONEEDGE(input_graphs[i].g.data(), r, c, m);
+                // 対角成分以外かつ、バイトが 1 の場合のみエッジを追加
+                if (r != c && bytes[r * n + c] == 1) {
+                    // ADDONEEDGE マクロを安全に使用、または直接ビット操作
+                    ADDELEMENT(row_ptr, c); 
                 }
             }
         }
