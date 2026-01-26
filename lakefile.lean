@@ -66,7 +66,7 @@ extern_lib liblean_glue pkg := do
   let srcDir := pkg.dir / "native"
   let mut nautyJobs : Array (Job System.FilePath) := #[]
 
-  let nautyTraceArgs := #["-O3", "-DMAXN=64", "-fPIC"]
+  let nautyTraceArgs := #["-O3", "-fPIC"]
   let nautyWeakArgs := #["-I", srcDir.toString]
 
   for src in nautySrcs do
