@@ -31,3 +31,20 @@ Example:
 ./.lake/build/bin/verify_proof.exe input.txt 3 17
 ```
 
+## Verification Details
+
+In `Verification/check.lean`, we perform rigorous rank calculations for the evidence embedding `p` over a finite field using formalized Gaussian Elimination.
+Regarding dependency evidence, we verify that for a specified graph $F \in \mathcal{C}_{n,t}$ and a circuit $C$, the condition $C \subseteq F$ holds and that the number of edges satisfies $|E(C)| > c_t(F)$.
+
+## Graph Enumeration
+
+The graph enumeration component allows for the generation of graphs with specific properties.
+
+- **`Spec.lean`**: Defines the mathematically rigorous logic for graph enumeration.
+- **`Impl.lean`**: Provides an executable implementation corresponding to the specification.
+- **`Correctness.lean`**: Establishes the equivalence between the executable implementation in `Impl.lean` and the rigorous specification in `Spec.lean`.
+- **`ByteImpl.lean`**: Offers a more practical and optimized implementation for faster enumeration.
+- **`ByteCorrectness.lean`**: Ensures the consistency between the reference `Impl.lean` and the optimized `ByteImpl.lean`.
+
+Note that for graph isomorphism checking (isomorphism deletion), we rely on `nauty` as an axiom.
+

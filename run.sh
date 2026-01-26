@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 開始と終了のインデックスを設定
-START=9
-END=200
+START=78
+END=199
 
 # 出力先ディレクトリが存在しない場合は作成しておく
 mkdir -p ./outputs/claim5/anchored/44440/
