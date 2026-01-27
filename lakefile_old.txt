@@ -24,7 +24,7 @@ lean_lib «SymmetricTensorProof» where
 def commonLinkArgs : Array String :=
   #[
     "-lstdc++",
-    "-L/home/jesus/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib"
+    "-L/home/kajiyama/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib"
   ] -- C++標準ライブラリをリンク
 
 lean_exe «graph-enum-claim5» where
