@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # 開始と終了のインデックスを設定
-START=0
+START=49
 END=199
 
 # 出力先ディレクトリが存在しない場合は作成しておく
-mkdir -p ./outputs/claim5/anchored/44330/
+mkdir -p ./outputs/claim5/anchored/44440/
 
 for ((i=START; i<=END; i++))
 do
