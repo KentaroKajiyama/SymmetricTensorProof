@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 開始と終了のインデックスを設定
-START=89
+START=0
 END=199
 
 # 出力先ディレクトリが存在しない場合は作成しておく
@@ -15,10 +15,10 @@ do
 
     # 実行コマンド (末尾の引数に $i を渡す)
     .lake/build/bin/graph-enum-claim5 \
-        anchored_init_padded_5.g6 \
+        anchored_init_padded_4.g6 \
         single \
-        ./outputs/claim5/intermediate/44440/21_part \
-        ./outputs/claim5/anchored/44440/21_part \
+        ./outputs/claim5/intermediate/44440/20_part \
+        ./outputs/claim5/anchored/44440/20_part \
         $i
 
     # 前のコマンドが失敗（終了コードが 0 以外）したら停止する
