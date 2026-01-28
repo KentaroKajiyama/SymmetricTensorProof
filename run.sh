@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 開始と終了のインデックスを設定
-START=0
+START=2
 END=199
 
 # 出力先ディレクトリが存在しない場合は作成しておく
@@ -29,6 +29,6 @@ do
 done
 
 echo "Done! All chunks from $START to $END have been processed."
-# echo "All tasks finished. Shutting down in 60 seconds..."
-# sleep 60
-# sudo poweroff  # インスタンスを停止する（課金を止める）
+echo "All tasks finished. Shutting down in 60 seconds..."
+sleep 60
+sudo poweroff  # インスタンスを停止する（課金を止める）
