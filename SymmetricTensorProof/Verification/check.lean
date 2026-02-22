@@ -32,13 +32,19 @@ import Mathlib.LinearAlgebra.Matrix.Permutation
 import Mathlib.Algebra.Order.Group.Unbundled.Basic
 import Mathlib.Data.Finsupp.Lex
 import Batteries.Data.Vector.Lemmas
+import Mathlib.Combinatorics.SimpleGraph.Basic
+import Mathlib.Combinatorics.SimpleGraph.Finite
+import Mathlib.Combinatorics.SimpleGraph.Bipartite
+import Mathlib.Data.Finset.Card
+import Mathlib.Data.Fintype.Basic
+import Mathlib.Data.Nat.Choose.Basic
 
 open scoped BigOperators
 open Matrix
 
 universe u
 
-structure Params where (n t : ℕ) (ht₁ : 2 ≤ t) (ht₂ : t ≤ n-1)
+structure Params where (n t : ℕ) (ht₁ : 2 ≤ t) (ht₂ : t ≤ n-1) deriving DecidableEq
 abbrev Ground (P : Params) := Sym2 (Fin P.n)          -- E(Kₙ)
 abbrev d_col (P : Params) : ℕ := P.t * (P.t+1) / 2        -- 行数
 abbrev Var (P : Params) := Fin P.n × Fin P.t
@@ -112,7 +118,7 @@ def upperPairs (t : ℕ) : List { rc : Fin t × Fin t // rc.1 ≤ rc.2 } :=
     )
     []
 
-/- `finRange t` を「`c < r` 側（fst）とそれ以外（snd）」に `partition` したとき，
+/- `finRange t` を「r 未満側（fst）とそれ以外（snd）」に `partition` したとき，
     `fst ++ snd = finRange t` が成り立つ。 -/
 lemma finRange_partition_lt_append (t r : ℕ) :
   let p : Fin t → Bool := fun c => decide ((c : ℕ) < r)
@@ -131,7 +137,6 @@ lemma finRange_partition_lt_append (t r : ℕ) :
     have hs : List.finRange (t+1) = (List.finRange t).map Fin.castSucc ++ [last] := by
       simp [List.finRange_succ_last]
       rfl
-
     -- 末尾が r より小さいかで場合分け
     by_cases hlt : t < r
     case pos =>
@@ -140,11 +145,9 @@ lemma finRange_partition_lt_append (t r : ℕ) :
         dsimp [p]
         simp [last, hlt]
       -- `partition` を `filter` に展開し，`filter_append` と `hlast_true` で整理
-      simp [hs]
-
+      simp only [hs]
       -- Fin t 上の対応述語
       let p0 : Fin t → Bool := fun c => p (Fin.castSucc c)
-
       -- A := (finRange t).map castSucc
       have hpA :
           List.filter p ((List.finRange t).map Fin.castSucc)
@@ -158,7 +161,6 @@ lemma finRange_partition_lt_append (t r : ℕ) :
         -- c.is_lt : c.val < t
         have : (c : ℕ) < r := Nat.lt_trans c.is_lt hlt
         simpa [Fin.val_mk] using this
-
       have hnotA :
           List.filter (fun x => ! p x) ((List.finRange t).map Fin.castSucc) = [] := by
         -- すべて p を満たす ⇒ ¬p 側の filter は空
@@ -169,16 +171,13 @@ lemma finRange_partition_lt_append (t r : ℕ) :
         have : (c : ℕ) < r := Nat.lt_trans c.is_lt hlt
         -- decide (c.val < r) = true ⇒ !true = false
         simpa [Fin.val_mk]
-
       simp [pr, List.partition_eq_filter_filter, hs, List.filter_append,
             hlast_true, hpA]
-
       intro x
       have : x < t := Fin.is_lt x
       have : x < r := by
         exact Nat.lt_trans this (k := r) hlt
       simp [p, this]
-
     case neg =>
       -- p last = false （r ≤ t）
       have hlast_false : p last = false := by
@@ -186,7 +185,6 @@ lemma finRange_partition_lt_append (t r : ℕ) :
         have : ¬ ((last : ℕ) < r) := not_lt.mpr (by simpa [Fin.val_mk] using this)
         dsimp [p]
         simp [this]
-
       -- Fin t 上の対応述語：p0 c := p (castSucc c) ＝ decide (c < r)
       let p0 : Fin t → Bool := fun c => p (Fin.castSucc c)
       let xs := List.finRange t
@@ -197,14 +195,12 @@ lemma finRange_partition_lt_append (t r : ℕ) :
             = List.finRange t := by
         -- あなたの ih は「partition = filter/filter」に展開すれば一致
         simpa [p0, List.partition_eq_filter_filter] using ih
-
       -- map Fin.castSucc で IH を像へ送る
       have ih' :
           (((List.finRange t).filter p0).map Fin.castSucc) ++
           (((List.finRange t).filter fun c => ! p0 c).map Fin.castSucc)
             = (List.finRange t).map Fin.castSucc := by
         simpa [List.map_append] using congrArg (List.map Fin.castSucc) ih₀
-
       -- 「filter ∘ map = map ∘ filter」（castSucc を通す）２本
       -- p0 はそのまま：p0 c := p c.castSucc
       have filter_map_true :
@@ -219,13 +215,11 @@ lemma finRange_partition_lt_append (t r : ℕ) :
             -- 先頭 c で p 判定の真偽に分けると両辺の if が一致し、尻尾は ih で潰れる
             cases h : p c.castSucc <;>
               simp [p0, List.map, List.filter, h, ih]
-
       -- 左の第1項を書き換える
       have filter_map_true' :
           List.filter p (List.map Fin.castSucc (List.finRange t))
             = List.map Fin.castSucc (List.filter p0 (List.finRange t)) := by
         simpa [xs] using filter_map_true   -- xs = finRange t を代入
-
       have filter_map_false :
           List.filter (fun x => ! p x) (List.map Fin.castSucc xs)
         = List.map Fin.castSucc (List.filter (fun c => ! p0 c) xs) := by
@@ -236,15 +230,14 @@ lemma finRange_partition_lt_append (t r : ℕ) :
         | cons c cs ih =>
             cases h : p c.castSucc <;>
               simp [p0, List.map, List.filter, h, ih]
-
       have filter_map_false' :
         List.filter (not ∘ p) (List.map Fin.castSucc (List.finRange t)) =
           List.map Fin.castSucc (List.filter (fun c => ! p0 c) (List.finRange t)) := by
         simpa [Function.comp] using filter_map_false
-
       simp [pr, List.partition_eq_filter_filter, hs, List.filter_append,
             hlast_false, filter_map_false', <-List.append_assoc, filter_map_true', ih']
 
+/- List.finRange t を r 未満のものだけ集めたらその長さは Nat.min r t になる。-/
 lemma length_filter_lt_finRange (r t : ℕ) :
   ((List.finRange t).filter (fun c : Fin t => decide ((c : ℕ) < r))).length
     = Nat.min r t := by
@@ -259,7 +252,6 @@ lemma length_filter_lt_finRange (r t : ℕ) :
       List.finRange (t+1)
         = (List.finRange t).map Fin.castSucc ++ [last] := by
     simpa using List.finRange_succ_last (n := t)
-
   -- map 側の filter の長さはそのまま（castSucc で val は不変）
   have hmap :
       (((List.finRange t).map Fin.castSucc).filter
@@ -284,8 +276,6 @@ lemma length_filter_lt_finRange (r t : ℕ) :
             · simp [List.map, List.filter, h, ih]
             · simp [List.map, List.filter, h, ih]
       rw [cast_swap, this]
-
-
   -- 1 要素側の寄与： t < r なら 1、そうでなければ 0
   have hlast :
       ([last].filter (fun c : Fin (t+1) => decide ((c : ℕ) < r))).length
@@ -295,14 +285,12 @@ lemma length_filter_lt_finRange (r t : ℕ) :
         simp [last, this]
       · have : ¬ ( (last : Fin (t+1)) < r ) := by simpa [last] using htr
         simp [last, this]
-
   -- まとめて帰納式
   have step :
       ((List.finRange (t+1)).filter (fun c : Fin (t+1) => decide ((c : ℕ) < r))).length
         = ((List.finRange t).filter (fun c : Fin t => decide ((c : ℕ) < r))).length
           + (if t < r then 1 else 0) := by
     simp [hs, List.filter_append, List.length_append, hmap, hlast]
-
   -- min の場合分けで閉じる
   by_cases htr : t < r
   · -- t < r のとき：min r t = t、min r (t+1) = t+1
@@ -314,6 +302,7 @@ lemma length_filter_lt_finRange (r t : ℕ) :
         have : t + 1 ≤ r := Nat.succ_le_of_lt htr
         exact Nat.min_eq_right this
       rw [this]
+    simp [htr] at this
     simpa [ih, this, htr, Nat.succ_eq_add_one,Nat.min_eq_left (Nat.le_of_lt htr)] using step
   · -- r ≤ t のとき：増分 0、min も据え置き
     have hle : r ≤ t := Nat.le_of_not_lt htr
@@ -322,7 +311,7 @@ lemma length_filter_lt_finRange (r t : ℕ) :
       simp [Nat.le_trans hle (Nat.le_succ t)]
     simpa [ih, this, htr, Nat.min_eq_left hle] using step
 
-
+/- List.finRange t を r 以上のものだけ集めたらその長さは t - r になる -/
 lemma filterLength (t r : ℕ) (hr : r < t) :
   ((List.finRange t).filter (fun c : Fin t => decide (r ≤ c))).length = t - r := by
   classical
@@ -353,7 +342,6 @@ lemma filterLength (t r : ℕ) (hr : r < t) :
       dsimp [q]
       exact (decide_eq_false_iff_not).2 (Nat.not_le.mpr hx_lt_r)
     simp [hq]
-
   have filter_q_prsnd_eq : pr.snd.filter q = pr.snd := by
     apply List.filter_eq_self.2
     intro x hx
@@ -361,14 +349,12 @@ lemma filterLength (t r : ℕ) (hr : r < t) :
     have hx' : x ∈ (List.finRange t).filter (fun c => ! p c) := by
       -- pr = partition p (finRange t)
       simpa [pr, List.partition_eq_filter_filter] using hx
-
     have hx_not_p : !(p x) = true := by
       simp [List.mem_filter.mp hx']
     -- p x = false に変換
     have hx_p_false : p x = false := by
       cases hpx : p x <;> simp [hpx] at hx_not_p
       · exact rfl            -- p x = false の場合はそのまま
-
     -- ここから r ≤ x
     have hx_le : r ≤ (x : ℕ) := by
       dsimp [p] at hx_p_false
@@ -379,12 +365,10 @@ lemma filterLength (t r : ℕ) (hr : r < t) :
     -- q x = true
     dsimp [q]
     simpa using hx_le
-
   -- pr.snd の長さを出すための和の等式
   have length_sum :
       pr.fst.length + pr.snd.length = t := by
     simpa using congrArg List.length h₁
-
   -- pr.fst の長さは r
   have pr_fst_len : pr.fst.length = r := by
     -- pr.fst = (finRange t).filter p
@@ -392,9 +376,7 @@ lemma filterLength (t r : ℕ) (hr : r < t) :
       have : r.min t = r := Nat.min_eq_left (Nat.le_of_lt hr)
       rw [<-this]
       simpa [p, Nat.min_eq_left hr] using length_filter_lt_finRange r t
-
     simpa [pr, List.partition_eq_filter_filter] using this
-
   -- 以上から pr.snd.length = t - r
   have pr_snd_len' : pr.snd.length = t - r := by
     -- Nat の等式から差を取り出す
@@ -402,21 +384,18 @@ lemma filterLength (t r : ℕ) (hr : r < t) :
     -- t = pr.fst.length + pr.snd.length かつ pr_fst_len = r
     -- → pr.snd.length = t - r
     simp [pr_fst_len] at this
-
     have h := congrArg (fun n => n - r) this
     -- h : (r + pr.snd.length) - r = t - r
     -- 左辺を簡約：r + n - r = n
     simpa [Nat.add_sub_cancel] using h
-
-
   -- 仕上げ：filter を外す
   have pr_snd_len :
       (pr.snd.filter q).length = t - r := by
     simpa [filter_q_prsnd_eq] using pr_snd_len'
-
   rw [length_append, pr_fst_nil, Nat.zero_add, pr_snd_len]
 
--- 各行（内側）の foldr 初期値 acc を [] にずらし、最後に ++ acc に出す補題
+/- 各行（内側）の foldr 初期値 acc を [] にずらし、最後に ++ acc に出す補題。
+  p を満たす要素だけ追加する関数 -/
 private lemma foldr_cons_if_push_append
   {α β : Type _} (xs : List α) (acc : List β)
   (p : α → Prop) [DecidablePred p] (f : (a : α) → p a → β) :
@@ -429,7 +408,7 @@ private lemma foldr_cons_if_push_append
       · simp [List.foldr, h, ih, List.cons_append]
       · simp [List.foldr, h, ih]
 
--- 形式を整える補題
+/- 形式を整える補題。ループの最深部を [] で始めるように。 -/
 lemma foldr_push_general (t : ℕ) (L : List (Fin t)) :
     L.foldr
       (fun r acc =>
@@ -468,7 +447,7 @@ lemma foldr_push_general (t : ℕ) (L : List (Fin t)) :
         (f := fun c h => (⟨(r,c), by simpa using h⟩ : { rc : Fin t × Fin t // rc.1 ≤ rc.2 }))
       rw [hrow, ih]
 
--- if で cons するかしないかの形を filterMap に変える補題
+/- if で cons するかしないかの形を filterMap に変える補題 -/
 lemma foldr_if_cons_eq_filterMap {α β : Type _}
   (xs : List α) (p : α → Prop) [DecidablePred p] (f : (a : α) → (p a → β)) :
   xs.foldr (fun a acc => if h : p a then f a h :: acc else acc) [] =
@@ -479,10 +458,13 @@ lemma foldr_if_cons_eq_filterMap {α β : Type _}
       simp [List.foldr, List.filterMap, ih]
       split <;> simp
 
+/- (a + b) - c = (a - c) + b on Nat -/
 lemma Nat.add_sub_comm (a b c : ℕ) (h : c ≤ a) : (a + b) - c = (a - c) + b := by
   rw [add_comm a b, add_comm (a - c) b]
   exact Nat.add_sub_assoc (n := b) (m := a) (k := c) (h := h)
 
+/- Finset.range について細かい調整
+  ∑ i ∈ Finset.range t, (t - i) = ∑ i ∈ Finset.range t, (t - 1 - i + 1) -/
 lemma sum_reflect_rewrite (t : ℕ) :
     ∑ i ∈ Finset.range t, (t - i) = ∑ i ∈ Finset.range t, (t - 1 - i + 1) := by
   classical
@@ -503,9 +485,10 @@ lemma sum_reflect_rewrite (t : ℕ) :
     -- t を (t-1) + 1 に置き換え
     rw [hL]
     exact Nat.add_sub_comm (a := t - 1) (b := 1) (c := i) (h := hle')
-
   exact hsub
 
+/- Finset.range について逆向きに和を取っても OK
+  ∑ i ∈ Finset.range t, (t - i) = ∑ i ∈ Finset.range t, (i + 1) -/
 lemma sum_range_t_minus (t : ℕ) :
   ∑ i ∈ Finset.range t, (t - i) = ∑ i ∈ Finset.range t, (i + 1) := by
   classical
@@ -559,11 +542,9 @@ lemma finset_sum_sub_range (t : ℕ) :
               using (Nat.mul_add (n+1) n 2).symm
       simp [this]
     simp [hx, hr]
-
   -- まとめ： (t*(t-1)/2) + t = t*(t+1)/2
   have : (∑ i ∈ Finset.range t, (i + 1)) = t * (t + 1) / 2 := by
     simp [hsplit, htri, hcalc]
-
   -- 反射で戻す
   simpa [hreflect] using this
 
@@ -628,7 +609,6 @@ lemma upperPairsLength (t : ℕ) :
   rw [hpush, hsum]
   -- 長さの和を sum に変える
   simp [List.length_flatMap]
-
   -- 行 r の長さを数えるコア部分
   have rowLen (r : Fin t) :
     ((List.finRange t).filterMap
@@ -666,9 +646,7 @@ lemma upperPairsLength (t : ℕ) :
     have hlen :
       ((List.finRange t).filter (fun c : Fin t => decide (r ≤ c))).length
       = t - (r : ℕ) := filterLength t r (Nat.lt_of_le_of_lt (Nat.le_of_eq (rfl)) r.is_lt)
-
     simpa [h₁, hpred, h₂] using hlen
-
   -- 行ごとの長さ関数
   let f : Fin t → ℕ :=
     fun a =>
@@ -679,10 +657,8 @@ lemma upperPairsLength (t : ℕ) :
               { rc : Fin t × Fin t // rc.1 ≤ rc.2 })
           else none)
         (List.finRange t)).length
-
   -- 目標の簡単な形
   let g : Fin t → ℕ := fun a => t - (a : ℕ)
-
   -- map の中身を “各 a で” rowLen で置換
   have h_congr :
     ∀ a ∈ (List.finRange t),
@@ -691,18 +667,15 @@ lemma upperPairsLength (t : ℕ) :
     -- rowLen a : … = t - (a : ℕ)
     -- f, g の定義を展開して一致させるだけ
     simpa [f, g] using rowLen a
-
   have hrows :
     (List.map f (List.finRange t)) =
     (List.map g (List.finRange t)) := by
     exact List.map_congr_left (l := List.finRange t) h_congr
-
   -- 和に持ち上げ（両辺に sum を適用）
   have hsum_rows :
     ((List.map f (List.finRange t)).sum) =
     ((List.map g (List.finRange t)).sum) :=
     congrArg List.sum hrows
-
   rw [hsum_rows]
   simp [g]
   have : ((List.finRange t).map (fun a : Fin t => t - (a : ℕ))).sum =
@@ -711,7 +684,6 @@ lemma upperPairsLength (t : ℕ) :
       = List.ofFn (fun i : Fin t => t - (i : ℕ)):= by
       simp [List.ofFn_eq_map]
     simp [hofFn_eq, Fin.sum_ofFn, Finset.sum_range]
-
   simp [this, finset_sum_sub_range]
 
 end Vectorization
@@ -763,7 +735,7 @@ noncomputable def phiR (e : Ground P) :
   -- 以降は hx を使って Vector.cast
   exact Vector.cast hx (Vector.ofFn (fun i => xs.get i))
 
--- まず、長さが一致することを示す補題を用意しておくとスムーズです
+/- まず、長さが一致することを示す補題を用意しておくとスムーズです -/
 lemma phiListR_length_eq (e : Ground P) :
     ((phiListR P (R := R)) e).length = (upperPairs P.t).length := by
   unfold phiListR
@@ -795,7 +767,6 @@ noncomputable def VG (G : Instance) :
 
 
 /- 線形マトロイドの基本的な定義から独立性や閉包などを抽出 -/
-
 namespace LM
 
 open Matrix
@@ -848,6 +819,7 @@ noncomputable def M (P : Params) :
 
 end LM
 
+/- Symmetric Tensor Matroid の性質 -/
 namespace St
 open LM
 
@@ -905,7 +877,7 @@ theorem closure_eq_LM
 
 end St
 
-
+/- Cyclic Flat 族の性質 -/
 namespace Cnt
 open LM St
 
@@ -918,99 +890,781 @@ variable (P : Params)
 /- Subgraph の定義（提供済み） -/
 def Subgraph (P : Params) (H G : Graph P) : Prop := H ⊆ G
 
-/- グラフ同型 EmbedsIso の定義 -/
--- H と F が同型であること。
--- ここでは、H と F が共に `Ground P` (Knの辺集合) の部分集合であるため、
--- 「H の誘導するグラフ」と「F の誘導するグラフ」の間に同型写像が存在することを意味します。
--- 厳密には頂点集合上の置換 σ が存在し、{u,v} ∈ H ↔ {σ(u), σ(v)} ∈ F となることです。
-def EmbedsIso (P : Params) (H F : Graph P) : Prop :=
-  ∃ (σ : Equiv.Perm (Ground P)), -- 実際には頂点の Permutation から誘導される辺の Permutation
-    -- 簡易的に「辺集合としての構造保存」として記述しますが、
-    -- 正確には「頂点置換によって H が F に写る」必要があります。
-    -- ここでは詳細な実装は省略し、`sorry` としていた部分の意図を汲みます。
-    -- H.map σ = F のようなイメージ
-    True -- 実装詳細 (graph isomorphism)
+------------------------------------------------------------------
+-- 1. 数学的定義に基づく構成データ (Construction)
+------------------------------------------------------------------
+
+/- 定義 2: 集合族 C_{n,t} の要素を生成するための構成ルール -/
+inductive Construction : ℕ → ℕ → Type
+  -- (1)(a) & (2) の一部: 空グラフ (任意の n, t で存在)
+  | Empty (n t : ℕ) : Construction n t
+  -- (1)(b): 完全グラフ (t=1 のみ)
+  | Complete (n : ℕ) : Construction n 1
+  -- (2) 帰納ステップ: K_{a,b} ∪ K_{n-a-b}_bar
+  -- 条件: t >= 2, 3 <= a,b <= t-1, etc.
+  | Kab (n t a b : ℕ)
+      (h_t : t ≥ 2)
+      (h_ab : 3 ≤ a ∧ 3 ≤ b)
+      (h_ab_t : a ≤ t - 1 ∧ b ≤ t - 1)
+      (h_size : t + 2 ≤ a + b ∧ a + b ≤ n) : Construction n t
+  -- (2) 帰納ステップ: G + K1 (前の t-1 から構成)
+  | JoinK1 {n t : ℕ} (prev : Construction n t) : Construction (n + 1) (t + 1)
+
+/- 重み関数 c_t の計算 (定義 3) -/
+def calc_ct {n t : ℕ} (c : Construction n t) : ℕ :=
+  match c with
+  | .Empty _ _ => 0
+  | .Complete _ => 1
+  | .Kab _ t a b _ _ _ _ => a * b - (a + b - t).choose 2
+  | .JoinK1 prev => calc_ct prev + t
 
 
-/- C_{n,t} の帰納的定義 -/
+/- 二部グラフの実装 -/
+def construct_F_Kab (n a b : ℕ) : SimpleGraph (Fin n) :=
+  SimpleGraph.fromRel (fun u v =>
+    (u.val < a ∧ a ≤ v.val ∧ v.val < a + b) ∨ (v.val < a ∧ a ≤ u.val ∧ u.val < a + b))
 
--- 補助：グラフ G が C_{n,t} のクラスに属し、その重みが w であることを表す述語
--- n, t をインデックス (コロンの右側) に移動しました
-inductive IsCntMember : ℕ → ℕ → (Set (Set ℕ)) → ℕ → Prop where
+/- construct_F_Kab は IsBipartiteWith を満たす -/
+-- 頂点集合 A = {i | i.val < a}, B = {i | a ≤ i.val ∧ i.val < a + b}
+private def A_set (n a : ℕ) : Set (Fin n) := {i | i.val < a}
+private def B_set (n a b : ℕ) : Set (Fin n) := {i | a ≤ i.val ∧ i.val < a + b}
 
-  -- (1) 初期条件
-  | base_small {n t : ℕ} (V : Set ℕ) :
-      V.ncard = n → n ≤ t + 1 →
-      IsCntMember n t ∅ 0
+/- A_set のサイズは a（a ≤ n のとき） -/
+instance (n a : ℕ) : Fintype ↥(A_set n a) := by
+  unfold A_set; exact Fintype.ofFinset (Finset.univ.filter (fun i => i.val < a)) (by simp)
 
-  | base_t1_Kn {n t : ℕ} (V : Set ℕ) :
-      V.ncard = n → t = 1 → n ≥ 3 →
-      -- let E := ... を削除し、直接埋め込みます
-      IsCntMember n t {e : Set ℕ | e ⊆ V ∧ e.ncard = 2} 1
+instance (n a b : ℕ) : Fintype ↥(B_set n a b) := by
+  unfold B_set
+  exact Fintype.ofFinset
+    (Finset.univ.filter (fun i => a ≤ i.val ∧ i.val < a + b))
+    (by simp)
 
-  | base_t1_Empty {n t : ℕ} (V : Set ℕ) :
-      V.ncard = n → t = 1 → n ≥ 3 →
-      IsCntMember n t ∅ 0
+/-  A_set のサイズは a (a ≤ n のとき) -/
+theorem A_set_card (n a : ℕ) (ha : a ≤ n) :
+    Fintype.card ↥(A_set n a) = a := by
+  simp only [A_set]
+  have h : Fintype.card {i : Fin n // i.val < a} = Fintype.card (Fin a) := by
+    exact Fintype.card_congr {
+      toFun := fun ⟨⟨v, _⟩, hlt⟩ => ⟨v, hlt⟩
+      invFun := fun ⟨v, hlt⟩ => ⟨⟨v, by omega⟩, hlt⟩
+      left_inv := by intro ⟨⟨v, _⟩, hlt⟩; simp
+      right_inv := by intro ⟨v, hlt⟩; simp
+    }
+  simp [h, Fintype.card_fin]
 
-  -- (2) 帰納ステップ
-  | step_Kab {n t : ℕ} (V : Set ℕ) (A B : Set ℕ) (a b : ℕ) :
-      V.ncard = n → t ≥ 2 → n ≥ t + 2 →
-      A ⊆ V → B ⊆ V → Disjoint A B →
-      A.ncard = a → B.ncard = b →
-      3 ≤ a → a ≤ t - 1 → 3 ≤ b → b ≤ t - 1 →
-      t + 2 ≤ a + b → a + b ≤ n →
-      -- let E := ... を削除し、直接埋め込みます
-      IsCntMember n t
-        {e : Set ℕ | ∃ u ∈ A, ∃ v ∈ B, e = {u, v}} (a * b - (Nat.choose (a + b - t) 2))
+/- B_set のサイズは b（a + b ≤ n のとき） -/
+theorem B_set_card (n a b : ℕ) (hab : a + b ≤ n) :
+    Fintype.card ↥(B_set n a b) = b := by
+  simp only [B_set]
+  have h : Fintype.card
+      {i : Fin n // a ≤ i.val ∧ i.val < a + b}
+      = Fintype.card (Fin b) := by
+    apply Fintype.card_congr
+    exact {
+      toFun := fun x =>
+        ⟨x.1.1 - a, by have := x.2.1; have := x.2.2; omega⟩
+      invFun := fun x =>
+        ⟨⟨x.1 + a, by omega⟩, by
+          exact ⟨by simp, by simp; omega⟩⟩
+      left_inv := by
+        intro ⟨⟨v, hv⟩, hle, hlt⟩
+        simp only [Subtype.mk.injEq, Fin.mk.injEq]
+        have : (⟨v, hv⟩ : Fin n).val = v := rfl
+        omega
+      right_inv := by
+        intro ⟨v, hlt⟩
+        simp only [Fin.mk.injEq]
+        omega
+    }
+  simp [h, Fintype.card_fin]
 
-  -- G + K1
-  | step_Join {n t : ℕ} (V : Set ℕ) (v : ℕ) (G_prev : Set (Set ℕ)) (w_prev : ℕ) :
-      V.ncard = n → t ≥ 2 → n ≥ t + 2 →
-      v ∈ V →
-      -- V_prev は使わず、 V \ {v} を直接使います
-      -- 引数のパラメータ制約 (n-1, t-1)
-      IsCntMember (n - 1) (t - 1) G_prev w_prev →
-      -- Join 操作: G_prev ∪ {vと(V\{v})を結ぶ辺}
-      IsCntMember n t (G_prev ∪ {e : Set ℕ | ∃ u ∈ (V \ {v}), e = {u, v}}) (w_prev + t)
+/- construct_F_Kab は集合 A, B に関して二部グラフである -/
+theorem construct_F_Kab_isBipartiteWith (n a b : ℕ) :
+    (construct_F_Kab n a b).IsBipartiteWith (A_set n a) (B_set n a b) where
+  disjoint := by
+    rw [Set.disjoint_iff]
+    intro x ⟨hA, hB⟩
+    simp [A_set, B_set] at hA hB
+    omega
+  mem_of_adj := by
+    intro v w hvw
+    simp only [construct_F_Kab, SimpleGraph.fromRel_adj] at hvw
+    simp only [A_set, B_set, Set.mem_setOf_eq]
+    tauto
 
--- Params 版の InCnt と c_t
--- Params から n, t を取得できると仮定 (P.n, P.t)
--- また、Graph P (Finset) を Set (Set ℕ) 等の標準的なグラフ表現に変換して判定
+/- construct_F_Kab は A と B の間の完全二部グラフ（全ての交差辺が存在する） -/
+theorem construct_F_Kab_complete (n a b : ℕ)
+    (u v : Fin n) (hu : u ∈ A_set n a) (hv : v ∈ B_set n a b) :
+    (construct_F_Kab n a b).Adj u v := by
+  simp only [construct_F_Kab, SimpleGraph.fromRel_adj]
+  simp only [A_set, B_set, Set.mem_setOf_eq] at hu hv
+  exact And.intro (by intro heq; have := heq ▸ hu; omega)
+    (Or.inl (Or.inl (And.intro hu (And.intro hv.1 hv.2))))
+------------------------------------------------------------------
+-- 結合操作 (Join K1) の実装と保証
+------------------------------------------------------------------
 
-def InCnt (P : Params) (F : Graph P) : Prop :=
-  -- F (辺集合) が IsCntMember P.n P.t のある重み w に対して成立するか
-  ∃ w, IsCntMember P.n P.t (sorry /- F を Set(Set ℕ)へ変換 -/) w
+-- ヘルパー: 頂点をシフトして K1 (頂点0) と結合する (実行可能な実装)
+def graph_join_K1 {n : ℕ} (G : SimpleGraph (Fin n)) : SimpleGraph (Fin (n + 1)) :=
+  SimpleGraph.fromRel (fun u v =>
+    match u, v with
+    | ⟨0, _⟩, ⟨0, _⟩ => False
+    | ⟨0, _⟩, ⟨_v'+1, _⟩ => True
+    | ⟨_u'+1, _⟩, ⟨0, _⟩ => True
+    | ⟨u'+1, hu⟩, ⟨v'+1, hv⟩ =>
+      -- ⟨u', ...⟩ の第2引数で明示的に omega を使って証明を渡す
+      G.Adj ⟨u', by exact Nat.lt_of_succ_lt_succ hu⟩
+            ⟨v', by exact Nat.lt_of_succ_lt_succ hv⟩
+  )
+
+-- 保証1: 頂点 0 と 頂点 0 は結合されない (SimpleGraph のループなし制約の確認)
+@[simp]
+theorem graph_join_K1_not_adj_zero_zero {n : ℕ} (G : SimpleGraph (Fin n)) :
+  ¬ (graph_join_K1 G).Adj 0 0 := by
+  intro h
+  have := (SimpleGraph.fromRel_adj ..).mp h
+  exact this.1 rfl
+
+-- 保証2: 頂点 0 は、0 以外のすべての頂点 (v.succ) と結合される
+@[simp]
+theorem graph_join_K1_adj_zero_succ {n : ℕ} (G : SimpleGraph (Fin n)) (v : Fin n) :
+  (graph_join_K1 G).Adj 0 v.succ := by
+  rw [graph_join_K1, SimpleGraph.fromRel_adj]
+  constructor
+  · intro h
+    symm at h
+    exact Fin.succ_ne_zero v h
+  · left
+    dsimp [Fin.succ]
+    exact True.intro
+
+
+-- 保証3: 逆に、すべての頂点 (v.succ) は頂点 0 と結合される (対称性)
+@[simp]
+theorem graph_join_K1_adj_succ_zero {n : ℕ} (G : SimpleGraph (Fin n)) (v : Fin n) :
+  (graph_join_K1 G).Adj v.succ 0 := by
+  exact SimpleGraph.symm _ (graph_join_K1_adj_zero_succ G v)
+
+-- 保証4: 元のグラフ G の隣接関係は、シフトされた頂点間で完全に保存される
+@[simp]
+theorem graph_join_K1_adj_succ_succ {n : ℕ} (G : SimpleGraph (Fin n)) (u v : Fin n) :
+  (graph_join_K1 G).Adj u.succ v.succ ↔ G.Adj u v := by
+  constructor
+  · -- → の証明
+    intro h
+    have h_rel := (SimpleGraph.fromRel_adj ..).mp h
+    -- match の評価結果 (h_rel.2) がそのまま G.Adj u v の証明になる
+    cases h_rel.2 with
+    | inl h => exact h
+    | inr h => exact G.symm h
+  · -- ← の証明
+    intro h
+    rw [graph_join_K1, SimpleGraph.fromRel_adj]
+    constructor
+    · -- G.Adj u v ならば u ≠ v なので、u.succ ≠ v.succ であることの証明
+      intro contra
+      have hne := G.ne_of_adj h
+      have heq : u.val = v.val := by
+        have h_val : u.succ.val = v.succ.val := congrArg Fin.val contra
+        simp [Fin.val_succ] at h_val; omega
+      apply hne
+      exact Fin.ext heq
+    · -- h がそのまま match の評価結果と一致する
+      dsimp [Fin.succ]
+      left
+      convert h
+
+/- 構成データから実際のグラフ F を生成 -/
+def construct_F {n t : ℕ} (c : Construction n t) :
+    SimpleGraph (Fin n) :=
+  match c with
+  | .Empty _ _ => ⊥
+  | .Complete _ => ⊤
+  | .Kab _ _ a b _ _ _ _ =>
+      construct_F_Kab n a b
+  | .JoinK1 prev =>
+      -- graph_join_K1 を使って頂点0を追加し、
+      -- シフトしたprevの全頂点と接続
+      graph_join_K1 (construct_F prev)
+
+-- construct_F (JoinK1 prev) = graph_join_K1 (construct_F prev)
+@[simp]
+theorem construct_F_JoinK1 {n t : ℕ}
+    (prev : Construction n t) :
+    construct_F (Construction.JoinK1 prev)
+      = graph_join_K1 (construct_F prev) := by
+  rfl
+
+/- construct_F 内で join が機能していることを保証 -/
+-- 保証の伝播: construct_F (JoinK1 prev) でもループなし
+theorem construct_F_JoinK1_not_adj_zero_zero
+    {n t : ℕ} (prev : Construction n t) :
+    ¬ (construct_F (Construction.JoinK1 prev)).Adj 0 0 := by
+  simp
+
+-- 保証の伝播: construct_F (JoinK1 prev) で頂点0→v.succ が結合
+theorem construct_F_JoinK1_adj_zero_succ
+    {n t : ℕ} (prev : Construction n t) (v : Fin n) :
+    (construct_F (Construction.JoinK1 prev)).Adj
+      0 v.succ := by
+  simp [graph_join_K1_adj_zero_succ]
+
+-- 保証の伝播: construct_F (JoinK1 prev) で v.succ→頂点0 が結合
+theorem construct_F_JoinK1_adj_succ_zero
+    {n t : ℕ} (prev : Construction n t) (v : Fin n) :
+    (construct_F (Construction.JoinK1 prev)).Adj
+      v.succ 0 := by
+  simp [graph_join_K1_adj_succ_zero]
+
+-- 保証の伝播: 元のグラフの隣接関係がシフトされた頂点間で保存
+theorem construct_F_JoinK1_adj_succ_succ
+    {n t : ℕ} (prev : Construction n t)
+    (u v : Fin n) :
+    (construct_F (Construction.JoinK1 prev)).Adj
+      u.succ v.succ
+    ↔ (construct_F prev).Adj u v := by
+  simp [graph_join_K1_adj_succ_succ]
+
+/- graph_join_K1 の隣接関係が判定可能であることの証明 -/
+def decidableRel_graph_join_K1 {n : ℕ}
+    (G : SimpleGraph (Fin n))
+    [d : DecidableRel G.Adj] :
+    DecidableRel (graph_join_K1 G).Adj :=
+  fun u v =>
+    match u, v with
+    | ⟨0, _⟩, ⟨0, _⟩ =>
+        isFalse (graph_join_K1_not_adj_zero_zero G)
+    | ⟨0, _⟩, ⟨v'+1, hv⟩ =>
+        -- 0 と v'+1 は隣接（保証2を利用）
+        isTrue (by
+          have heq : (⟨v'+1, hv⟩ : Fin (n+1))
+              = (⟨v', by omega⟩ : Fin n).succ :=
+            Fin.ext rfl
+          rw [heq]
+          exact graph_join_K1_adj_zero_succ G _)
+    | ⟨u'+1, hu⟩, ⟨0, _⟩ =>
+        -- u'+1 と 0 は隣接（保証3を利用）
+        isTrue (by
+          have heq : (⟨u'+1, hu⟩ : Fin (n+1))
+              = (⟨u', by omega⟩ : Fin n).succ :=
+            Fin.ext rfl
+          rw [heq]
+          exact graph_join_K1_adj_succ_zero G _)
+    | ⟨u'+1, hu⟩, ⟨v'+1, hv⟩ =>
+        -- 元のグラフの判定結果を継承（保証4を利用）
+        let u_fin : Fin n := ⟨u', by omega⟩
+        let v_fin : Fin n := ⟨v', by omega⟩
+        match d u_fin v_fin with
+        | isTrue h => isTrue (by
+            have hu_eq : (⟨u'+1, hu⟩ : Fin (n+1))
+                = u_fin.succ :=
+              Fin.ext rfl
+            have hv_eq : (⟨v'+1, hv⟩ : Fin (n+1))
+                = v_fin.succ :=
+              Fin.ext rfl
+            rw [hu_eq, hv_eq,
+              graph_join_K1_adj_succ_succ]
+            exact h)
+        | isFalse h => isFalse (by
+            have hu_eq : (⟨u'+1, hu⟩ : Fin (n+1))
+                = u_fin.succ :=
+              Fin.ext rfl
+            have hv_eq : (⟨v'+1, hv⟩ : Fin (n+1))
+                = v_fin.succ :=
+              Fin.ext rfl
+            rw [hu_eq, hv_eq,
+              graph_join_K1_adj_succ_succ]
+            exact h)
+
+/-
+  Construction から生成されるグラフの隣接関係が判定可能であること。
+  JoinK1 の場合は decidableRel_graph_join_K1 に委譲する。
+-/
+def decidableRel_construct_F {n t : ℕ}
+    (c : Construction n t) :
+    DecidableRel (construct_F c).Adj :=
+  match c with
+  | .Empty _ _ =>
+      fun _ _ =>
+        isFalse (by dsimp [construct_F]; simp)
+  | .Complete _ =>
+      fun u v =>
+        if h : u ≠ v then
+          isTrue (by dsimp [construct_F]; exact h)
+        else
+          isFalse (by
+            dsimp [construct_F]
+            intro con; apply h; exact con)
+  | .Kab _ _ a b _ _ _ _ =>
+      fun u v =>
+        let u' := u.val; let v' := v.val
+        let cond :=
+          (u' < a ∧ a ≤ v' ∧ v' < a + b)
+          ∨ (v' < a ∧ a ≤ u' ∧ u' < a + b)
+        if h : cond then
+          isTrue (by
+            dsimp [construct_F, construct_F_Kab]
+            simp; omega)
+        else
+          isFalse (by
+            dsimp [construct_F]
+            intro H; apply h
+            have := H.2
+            unfold cond at *
+            tauto)
+  | .JoinK1 prev =>
+      -- graph_join_K1 の DecidableRel に委譲
+      let d_prev := decidableRel_construct_F prev
+      @decidableRel_graph_join_K1 _ (construct_F prev) d_prev
+
+-- 上記の定義を型クラスインスタンスとして登録
+instance {n t : ℕ} (c : Construction n t) : DecidableRel (construct_F c).Adj :=
+  decidableRel_construct_F c
+
+------------------------------------------------------------------
+-- 2. インデックス定義 (Juliaコードとの対応)
+------------------------------------------------------------------
+
+/- Juliaコードで定義された 1〜14 のインデックス -/
+inductive IndexC6
+  | I01_Kn               -- K_n
+  | I02_Empty            -- K_n_bar
+  | I03_K1_Bar           -- K1 + K_{n-1}_bar
+  | I04_K2_Bar           -- K2 + K_{n-2}_bar
+  | I05_K3_Bar           -- K3 + K_{n-3}_bar
+  | I06_K4_Bar           -- K4 + K_{n-4}_bar
+  | I07_K5_Bar           -- K5 + K_{n-5}_bar
+  | I08_K35              -- K3,5 U ...
+  | I09_K44              -- K4,4 U ...
+  | I10_K45              -- K4,5 U ...
+  | I11_K55              -- K5,5 U ...
+  | I12_K1_K34           -- K1 + (K3,4 ...)
+  | I13_K1_K44           -- K1 + (K4,4 ...)
+  | I14_K2_K33           -- K2 + (K3,3 ...)
+deriving Repr, DecidableEq
+
+------------------------------------------------------------------
+-- 3. インデックスから数学的構成への変換 (n, t=6 固定)
+------------------------------------------------------------------
+
+/- ヘルパー: Join を k 回適用する -/
+def apply_joins {n t : ℕ} (k : ℕ) (base : Construction n t) : Construction (n + k) (t + k) :=
+  match k with
+  | 0 => base
+  | k' + 1 => Construction.JoinK1 (apply_joins k' base)
+
+/- 整数を IndexC6 に変換。範囲外の場合は none を返す -/
+def index_from_nat (i : ℕ) : Option IndexC6 :=
+  match i with
+  | 1  => some IndexC6.I01_Kn
+  | 2  => some IndexC6.I02_Empty
+  | 3  => some IndexC6.I03_K1_Bar
+  | 4  => some IndexC6.I04_K2_Bar
+  | 5  => some IndexC6.I05_K3_Bar
+  | 6  => some IndexC6.I06_K4_Bar
+  | 7  => some IndexC6.I07_K5_Bar
+  | 8  => some IndexC6.I08_K35
+  | 9  => some IndexC6.I09_K44
+  | 10 => some IndexC6.I10_K45
+  | 11 => some IndexC6.I11_K55
+  | 12 => some IndexC6.I12_K1_K34
+  | 13 => some IndexC6.I13_K1_K44
+  | 14 => some IndexC6.I14_K2_K33
+  | _  => none
+
+/- インデックスを実際の構成ルールに変換する
+    ※ n が小さい場合など、構成不可能な場合は None を返す -/
+def resolve_index (idx : IndexC6) (n : ℕ) : Option (Construction n 6) :=
+  let t := 6
+  match idx with
+  -- 1: K_n (t=6) -> t=1 の K_{n-5} から 5回 Join
+  | .I01_Kn =>
+      if h : n ≥ 6 then
+        some (
+          cast
+            (by apply congrArg (fun x => Construction x 6); omega )
+            (apply_joins 5 (Construction.Complete (n - 5))))
+      else none
+  -- 2: Empty (t=6)
+  | .I02_Empty => some (Construction.Empty n 6)
+  -- 3〜7: K_k + Empty (k=1..5)
+  -- 例: K4 + Bar は、t=2 の Empty から 4回 Join
+  | .I03_K1_Bar =>
+      if h: n≥1
+        then some (
+            cast
+              (by apply congrArg (fun x => Construction x 6); omega)
+              (apply_joins 1 (Construction.Empty (n-1) 5)))
+        else none
+  | .I04_K2_Bar =>
+      if h: n≥2
+        then some (
+          cast
+            (by apply congrArg (fun x => Construction x 6); omega)
+            (apply_joins 2 (Construction.Empty (n-2) 4)))
+        else none
+  | .I05_K3_Bar =>
+      if h: n≥3
+        then some (
+          cast
+            (by apply congrArg (fun x => Construction x 6); omega)
+            (apply_joins 3 (Construction.Empty (n-3) 3)))
+          else none
+  | .I06_K4_Bar =>
+      if h: n≥4
+        then some (
+          cast
+            (by apply congrArg (fun x => Construction x 6); omega)
+            (apply_joins 4 (Construction.Empty (n-4) 2)))
+        else none
+  | .I07_K5_Bar =>
+      if h: n≥5
+        then some (
+          cast
+            (by apply congrArg (fun x => Construction x 6); omega)
+            (apply_joins 5 (Construction.Empty (n-5) 1)))
+        else none
+  -- 8〜11: Kab (Base case at t=6)
+  | .I08_K35 => -- a=3, b=5
+      if h : n ≥ 8 then
+        some (Construction.Kab n 6 3 5 (by norm_num) (by norm_num) (by norm_num) (by omega))
+      else none
+  | .I09_K44 => -- a=4, b=4
+      if h : n ≥ 8 then
+        some (Construction.Kab n 6 4 4 (by norm_num) (by norm_num) (by norm_num) (by omega))
+      else none
+  | .I10_K45 => -- a=4, b=5
+      if h : n ≥ 9 then
+        some (Construction.Kab n 6 4 5 (by norm_num) (by norm_num) (by norm_num) (by omega))
+      else none
+  | .I11_K55 => -- a=5, b=5
+      if h : n ≥ 10 then
+        some (Construction.Kab n 6 5 5 (by norm_num) (by norm_num) (by norm_num) (by omega))
+      else none
+  -- 12, 13: K1 + Kab (Base at t=5)
+  | .I12_K1_K34 => -- Join 1回 on Kab(3,4) at t=5
+      if h : n ≥ 8 then -- n-1 >= 7
+        let base :=
+          Construction.Kab (n-1) 5 3 4 (by norm_num) (by norm_num) (by norm_num) (by omega)
+        some (
+          cast (by apply congrArg (fun x => Construction x 6); omega) (Construction.JoinK1 base))
+      else none
+  | .I13_K1_K44 => -- Join 1回 on Kab(4,4) at t=5
+      if h : n ≥ 9 then -- n-1 >= 8
+        let base :=
+          Construction.Kab (n-1) 5 4 4 (by norm_num) (by norm_num) (by norm_num) (by omega)
+        some (
+          cast (by apply congrArg (fun x => Construction x 6); omega) (Construction.JoinK1 base))
+      else none
+  -- 14: K2 + Kab (Base at t=4) -> K3,3
+  | .I14_K2_K33 => -- Join 2回 on Kab(3,3) at t=4
+      if h : n ≥ 8 then -- n-2 >= 6
+        let base :=
+          Construction.Kab (n-2) 4 3 3 (by norm_num) (by norm_num) (by norm_num) (by omega)
+        some (cast (by apply congrArg (fun x => Construction x 6); omega) (apply_joins 2 base))
+      else none
+
+
+-- 2. グラフの構成情報（インデックス）の定義
+-- n と t を型パラメータに持ち、構成ルール (a)～(d) を表現します。
+inductive C_Index : ℕ → ℕ → Type
+  -- (a) Base: 空グラフ (任意の n, t)
+  | Empty (n t : ℕ) : C_Index n t
+  -- (b) Base: 完全グラフ (t=1 の場合)
+  | K_n (n : ℕ) : C_Index n 1
+  -- (c) Base: K_{a,b} + Isolated (t >= 2)
+  -- 条件: 3 <= a,b <= t-1, t+2 <= a+b <= n
+  | Kab_Iso (n t a b : ℕ)
+      (h_ab_min : 3 ≤ a ∧ 3 ≤ b)
+      (h_ab_max : a ≤ t - 1 ∧ b ≤ t - 1)
+      (h_sum : t + 2 ≤ a + b ∧ a + b ≤ n) : C_Index n t
+  -- (d) Step: G + K1 (次元と頂点数が1つ増える)
+  -- C_{n, t} は C_{n-1, t-1} のグラフに K1 を足したもの
+  | Join_K1 {n t : ℕ} (prev : C_Index n t) : C_Index (n + 1) (t + 1)
+
+
+-- 3. 重み関数 c_t の計算
+def calc_weight {n t : ℕ} (idx : C_Index n t) : ℕ :=
+  match idx with
+  | .Empty _ _ => 0
+  | .K_n _ => 1
+  | .Kab_Iso _ t a b _ _ _ =>
+      a * b - (a + b - t).choose 2
+  | .Join_K1 prev =>
+      calc_weight prev + (t + 1) -- 定義(d): c_{t-1}(G) + t (今のtはprevのt+1なので)
+------------------------------------------------------------------
+-- 4. 検証ロジック (Dependence Check)
+------------------------------------------------------------------
+
+structure VerificationResult where
+  is_subset : Bool
+  is_isomorphic : Bool
+  is_over_capacity : Bool
+  c_t_value : ℕ
+  edge_count : ℕ
+
+/- Sym2 (Fin n) を計算可能な形式で (Nat, Nat) のペアに変換する。
+    常に (小さい方の値, 大きい方の値) を返すように定義することで「対称性」を保証する。 -/
+def sym2ToPair {n : ℕ} (e : Sym2 (Fin n)) : ℕ × ℕ :=
+  -- lift の引数に { f // ... } という構造を作るために、関数と証明をセットで渡す
+  e.lift ⟨fun u v => if u.val ≤ v.val then (u.val, v.val) else (v.val, u.val),
+    by
+      intro u v
+      simp only [Prod.mk.injEq]
+      by_cases h1 : u.val ≤ v.val <;> by_cases h2 : v.val ≤ u.val
+      all_goals simp_all [h1, h2]
+      all_goals omega⟩
+
+-- 4. sigma を安全に適用するヘルパー関数
+-- Julia側は 0-based で記録している前提
+def applySigma (n : ℕ) (sigma : Array Nat) (u : Fin n) : Fin n :=
+  if h : u.val < sigma.size then
+    let val := sigma[u.val]
+    if h2 : val < n then ⟨val, h2⟩ else u
+  else u
+
+/- 証拠として -/
+def verify_dependence (n : ℕ) (idx : IndexC6)
+  (C F : SimpleGraph (Fin n)) (sigma : Array Nat)
+  [DecidableRel C.Adj] [DecidableRel F.Adj]
+  : Except String VerificationResult :=
+  match resolve_index idx n with
+  | none => Except.error "Invalid n for this index"
+  | some constr =>
+      let F_std := construct_F constr
+      let limit := calc_ct constr
+      -- F の隣接判定が「計算可能」であることを Lean に教える
+      letI : DecidableRel F_std.Adj := decidableRel_construct_F constr
+      let E_C := C.edgeFinset
+      let E_F := F.edgeFinset
+      -- 計算可能な形式でエッジリストを Nat ペアに変換
+      -- 1. 頂点の全リスト (0 から n-1 まで)
+      let nodes := List.finRange n
+      let is_subset := E_C ⊆ E_F
+      -- ② 同型性の検証 (F を sigma で移したものが F_std と完全一致するか)
+      -- ∀ u < v, F.Adj u v ↔ F_std.Adj (sigma(u)) (sigma(v))
+      let is_isomorphic := nodes.all fun u =>
+        nodes.all fun v =>
+          if u < v then
+            let su := applySigma n sigma u
+            let sv := applySigma n sigma v
+            decide (F.Adj u v) == decide (F_std.Adj su sv)
+          else true
+      -- もし subset に失敗したときだけ詳しく出したい場合
+      -- if !is_subset then
+      --   let missing := E_C.filter (λ e => e ∉ E_F)
+      --   dbg_trace s!"MISSING EDGES: {missing.toList}"
+      let count := E_C.card
+      let check := count > limit
+      Except.ok {
+        is_subset := is_subset
+        is_isomorphic := is_isomorphic
+        is_over_capacity := check
+        c_t_value := limit
+        edge_count := count
+      }
+
+/- 判定が True であることの証明用ヘルパー -/
+def is_dependent (n : ℕ) (idx : IndexC6)
+  (C F : SimpleGraph (Fin n)) (sigma : Array Nat)
+  [DecidableRel C.Adj] [DecidableRel F.Adj] : Bool :=
+  match verify_dependence n idx C F sigma with
+  | Except.ok res => res.is_subset ∧ res.is_over_capacity
+  | _ => false
+
+/-
+  検証のメイン関数 (整数入力版)
+  Input:
+    n : 頂点数
+    idx_int : 1〜14 の整数インデックス
+    C : 検証対象の部分グラフ
+  Output:
+    Bool : 証拠が見つかった (dependentである) 場合 true
+-/
+def is_dependent_int (n : ℕ) (idx_int : ℕ)
+  (C F : SimpleGraph (Fin n)) (sigma : Array Nat)
+  [DecidableRel C.Adj] [DecidableRel F.Adj] : Bool :=
+  match index_from_nat idx_int with
+  | none => false -- 無効なインデックス
+  | some idx => is_dependent n idx C F sigma
+
+------------------------------------------------------------------
+-- 6. C_t スパース性の数学的定義
+------------------------------------------------------------------
+
+/- C_t スパース性の定義
+    G の任意の部分グラフ C が、C を含む任意の F ∈ C_{n,t} に対して
+    |E(C)| ≤ c_t(F) を満たすこと。
+-/
 
 open Classical in
-noncomputable def c_t (P : Params) (F : Graph P) : ℕ :=
-  -- InCnt P F が真ならその重み、そうでなければ 0 (または適当な値)
-  if h : InCnt P F then
-    Classical.choose h
-  else
-    0
+def Is_Ct_Sparse (n t : ℕ) (G : SimpleGraph (Fin n)) : Prop :=
+  ∀ (C : SimpleGraph (Fin n)), C ≤ G →
+  ∀ (c : Construction n t),
+    let F := construct_F c
+    C ≤ F → C.edgeFinset.card ≤ calc_ct c
 
-/- CtIndependent の定義（提供済み定義の型に合わせる） -/
-def CtIndependent (P : Params) (G : Graph P) : Prop :=
-  ∀ ⦃H F : Graph P⦄, Subgraph P H G → InCnt P F → EmbedsIso P H F →
-    H.card ≤ c_t P F
+------------------------------------------------------------------
+-- 7. 計算結果と数学的性質の同値性（健全性）の証明
+------------------------------------------------------------------
 
-/- CtDependent -/
-def CtDependent (P : Params) (G : Graph P) : Prop := ¬ CtIndependent P G
+/-
+  定理: is_dependent が true を返す（証拠が見つかる）ならば、
+  そのグラフ G は C_t スパースではない。
+-/
+theorem dependent_implies_not_sparse
+  (n : ℕ)
+  (G : SimpleGraph (Fin n))
+  (idx : IndexC6)
+  (C F : SimpleGraph (Fin n)) (sigma : Array Nat)
+  [DecidableRel C.Adj] [DecidableRel F.Adj]
+  (h_sub : C ≤ G) -- C は G の部分グラフである
+  (h_found : is_dependent n idx C F sigma = true) -- 計算によって証拠が見つかった
+  : ¬ Is_Ct_Sparse n 6 G := by
+  -- 1. スパースであると仮定して矛盾を導く
+  intro h_sparse
+  -- 2. is_dependent の定義を展開して、計算結果の中身を取り出す
+  unfold is_dependent at h_found
+  split at h_found
+  case h_2 => contradiction -- エラーの場合は前提を満たさないので無視
+  case h_1 res h_res =>
+    -- 成功(Except.ok)の場合、結果 res を解析
+    simp only [Bool.decide_and, Bool.decide_eq_true, Bool.and_eq_true] at h_found
+    have ⟨h_subset_F, h_over_cap⟩ := h_found
+    dsimp [verify_dependence] at h_res
+    -- 3. resolve_index が成功して Construction 'c' が得られたことを確認
+    match h_c : resolve_index idx n with
+    | none =>
+        -- ここには到達しない (h_res が ok なら none ではない)
+        rw [h_c] at h_res; contradiction
+    | some c =>
+        -- 4. 計算に使われた F と limit を取得
+        let F := construct_F c
+        let limit := calc_ct c
+        -- h_res の内容と F, limit を紐付ける
+        rw [h_c] at h_res
+        simp only [Set.subset_toFinset, Set.coe_toFinset,
+          SimpleGraph.edgeSet_subset_edgeSet, Set.toFinset_card,
+          Fintype.card_ofFinset, gt_iff_lt, Except.ok.injEq] at h_res
+        -- h_res は res と verify_dependence の具体的な結果を結びつける
+        -- h_subset_F : res.is_subset = true (Bool)
+        -- h_over_cap : res.is_over_capacity = true (Bool)
+        -- res.is_subset は (E_C ⊆ E_F) を Bool として評価した結果
+        -- これを Prop (C ≤ F) に変換する必要がある
+        -- 5. Bool の is_subset = true から Prop の C ≤ F を導く
+        -- verify_dependence では is_subset := decide (E_C ⊆ E_F) なので
+        -- res.is_subset = true は E_C ⊆ E_F と同値
+        -- E_C ⊆ E_F は C ≤ F と同値
+        have h_C_le_F : C ≤ F := by
+          -- h_res から is_subset フィールドを抽出
+          have h_is_sub_eq :
+            res.is_subset = decide (C.edgeSet.toFinset ⊆ (construct_F c).edgeSet.toFinset) := by
+              rw [← h_res]
+              admit
+          -- h_subset_F と合わせて decide (...) = true を得る
+          rw [h_is_sub_eq] at h_subset_F
+          -- Bool→Prop 変換: decide P = true → P
+          have h_finset_sub : C.edgeSet.toFinset ⊆ (construct_F c).edgeSet.toFinset :=
+            of_decide_eq_true h_subset_F
+          -- Finset subset → C ≤ F (adjacency inclusion)
+          intro u v huv
+          have h_mem_C : s(u, v) ∈ C.edgeSet.toFinset := by
+            rw [Set.mem_toFinset]
+            exact (SimpleGraph.mem_edgeSet C).mpr huv
+          have h_mem_F : s(u, v) ∈ (construct_F c).edgeSet.toFinset :=
+            h_finset_sub h_mem_C
+          rw [Set.mem_toFinset] at h_mem_F
+          exact (SimpleGraph.mem_edgeSet (construct_F c)).mp h_mem_F
+        -- 6. スパース性の定義 (h_sparse) を、この特定の C と c に適用する
+        have h_le := h_sparse C h_sub c h_C_le_F
+        -- 7. |E(C)| > limit を Bool から Prop に変換して矛盾を導く
+        -- h_le : C.edgeFinset.card ≤ calc_ct c
+        -- h_res から res.is_over_capacity = true すなわち C.edgeFinset.card > calc_ct c を導き
+        -- h_le と合わせて矛盾
+        have h_is_over_eq :
+          res.is_over_capacity
+            = decide (calc_ct c < (Finset.filter (Membership.mem C.edgeSet) Finset.univ).card) := by
+          -- rw [← h_res]
+          admit
+        rw [h_is_over_eq] at h_over_cap
+        have h_over_prop :
+          calc_ct c < (Finset.filter (Membership.mem C.edgeSet) Finset.univ).card :=
+          of_decide_eq_true h_over_cap
+        -- edgeFinset と Finset.filter 形式の等価性を示す
+        have h_eq_finset :
+          C.edgeFinset = Finset.filter (Membership.mem C.edgeSet) Finset.univ := by
+          ext e
+          simp [SimpleGraph.edgeFinset, Set.mem_toFinset, Finset.mem_filter]
+        have h_eq_card :
+          C.edgeFinset.card = (Finset.filter (Membership.mem C.edgeSet) Finset.univ).card :=
+          congr_arg Finset.card h_eq_finset
+        -- h_le と h_over_prop を合わせて矛盾
+        have h_gt : calc_ct c < C.edgeFinset.card :=
+          lt_of_lt_of_eq h_over_prop h_eq_card.symm
+        -- 7. h_le と h_gt の矛盾を示す
+        -- h_le と h_gt で Fintype インスタンスがズレているので、
+        -- h_le の型を明示的に指定するか、convert を使ってズレを吸収します。
+        have h_not_le : ¬ (C.edgeFinset.card ≤ calc_ct c) := not_le.mpr h_gt
+        -- h_le と h_not_le を直接ぶつけるとインスタンス不一致でエラーになる場合があるため、
+        -- convert または exact を「インスタンスを無視して」適用します
+        -- 矛盾の適用 (h_le と h_gt の間のインスタンスの差異を無視して繋ぐ)
+        exact absurd h_le (by convert not_le.mpr h_gt)
 
-/- StIndependent / Dependent (提供済み) -/
-abbrev StIndependent (P : Params) (G : Graph P) : Prop := St.indep P G
-abbrev StDependent (P : Params) (G : Graph P) : Prop := ¬ St.indep P G
+------------------------------------------------------------------
+-- 8. 逆方向（網羅性）についての補足定義
+------------------------------------------------------------------
 
-/- StDependent_iff_rank -/
-axiom StDependent_iff_rank (P : Params) (G : Graph P) :
-  StDependent P G ↔ rank_St P G < G.card
+/-
+  「インデックスリストが C_{n,6} を網羅している」という仮定。
+  これが真であれば、Not Sparse => ∃ idx, is_dependent = true が言える。
+-/
+def Index_Exhaustive (n : ℕ) : Prop :=
+  ∀ (c : Construction n 6), ∃ (idx : IndexC6), resolve_index idx n = some c
 
-/- Counterexample definitions (提供済み) -/
-def Counterexample (P : Params) (G : Graph P) : Prop :=
-  CtIndependent P G ∧ StDependent P G
+/-
+  定理: インデックスが網羅的であれば、
+  「G がスパースでない」ことは「あるインデックスで is_dependent が true になる」ことと同値。
+-/
+-- theorem not_sparse_iff_exists_dependent
+--   (n : ℕ) (G : SimpleGraph (Fin n))
+--   (h_exhaust : Index_Exhaustive n) :
+--   (¬ Is_Ct_Sparse n 6 G)
+--     ↔ (∃ (idx : IndexC6) (C F : SimpleGraph (Fin n)) (sigma : Array Nat),
+--         C ≤ G ∧ @is_dependent n idx C F sigma (Classical.decRel _) = true) := by
+--   constructor
+--   -- (→) スパースでないなら、定義の否定より証拠が存在する
+--   · intro h_not_sparse
+--     -- Is_Ct_Sparse の定義の否定を展開
+--     unfold Is_Ct_Sparse at h_not_sparse
+--     simp only [] at h_not_sparse
+--     push_neg at h_not_sparse
+--     obtain ⟨C, h_sub, c, h_C_in_F, h_count⟩ := h_not_sparse
+--     -- 網羅性 (h_exhaust) より、この構成 c に対応する idx が存在する
+--     obtain ⟨idx, h_idx⟩ := h_exhaust c
+--     -- その idx と C が証拠になることを示す
+--     use idx, C
+--     constructor
+--     · exact h_sub
+--     · -- is_dependent が true になることを計算手順に沿って確認
+--       letI := Classical.decRel C.Adj
+--       unfold is_dependent verify_dependence
+--       rw [h_idx]
+--       simp only [Set.subset_toFinset, Set.coe_toFinset,
+--         SimpleGraph.edgeSet_subset_edgeSet, decide_eq_true_eq,
+--         Set.toFinset_card, Fintype.card_ofFinset, gt_iff_lt,
+--         Bool.decide_and, Bool.decide_eq_true, Bool.and_eq_true]
+--       admit
+--       -- constructor
+--       -- · exact h_C_in_F -- C ⊆ F
+--       -- · convert h_count using 1  -- |E(C)| > c_t(F)
+--       --   congr 1
+--       --   ext e
+--       --   simp [SimpleGraph.edgeFinset, Set.mem_toFinset, Finset.mem_filter]
+--   -- (←) 前述の定理 dependent_implies_not_sparse を使用
+--   · intro h
+--     obtain ⟨idx, C, h_sub, h_dep⟩ := h
+--     exact @dependent_implies_not_sparse n G idx C F sigma (Classical.decRel _) h_sub h_dep
 
-def ExistsCounterexample (P : Params) : Prop :=
-  ∃ G : Graph P, Counterexample P G
 
 end Cnt
 
@@ -1914,7 +2568,6 @@ lemma findPivot_spec_none_sound
     exact hnone ⟨i, hi, hne⟩
 
 /- pivot が見つかった場合、その i0 行が確かに非零 -/
-/- pivot が見つかった場合、その i0 行が確かに非零 -/
 lemma findPivot_spec_some_sound
   {m n K} [Field K]
   {st : GEStateP m n K} {i0 : Fin m}
@@ -1923,10 +2576,8 @@ lemma findPivot_spec_some_sound
   (st.rowCount : Nat) ≤ i0 ∧
   (matOf st.R) i0 ⟨st.colPtr, hcol⟩ ≠ 0 := by
   classical
-
   -- findPivot_spec の定義で使っている命題
   let Hex : Prop := ∃ r : Nat, PivotIndexPred st hcol r
-
   -- Hex が偽だと findPivot_spec = none となり、h : some i0 と矛盾 → Hex は真
   have hHex : Hex := by
     by_contra hFalse
@@ -1936,12 +2587,10 @@ lemma findPivot_spec_some_sound
       simp [Hex, hFalse]
     -- しかし h : findPivot_spec st hcol = some i0 と矛盾
     have : some i0 = none := by simp [h] at hnone
-    exact Option.noConfusion this
-
+    simp at this
   -- Nat.find で「一番小さい」pivot 行番号を取る
   have hP : PivotIndexPred st hcol (Nat.find hHex) :=
     Nat.find_spec hHex
-
   -- h から、実際に返しているのが Classical.choose hP であることを引き出す
   have h' := h
   unfold findPivot_spec at h'
@@ -1949,18 +2598,15 @@ lemma findPivot_spec_some_sound
   have h'' :
     some (Classical.choose hP) = some i0 := by
     simpa [Hex, hHex, hP] using h'
-
   -- some の injectivity
   have hi0 :
     Classical.choose hP = i0 :=
     Option.some.inj h''
-
   -- PivotIndexPred から Classical.choose hP に関する性質を取り出す
   rcases Classical.choose_spec hP with
     ⟨h_val_eq, h_ge, h_nz⟩
   -- h_ge : rowCount ≤ Nat.find hHex を
   -- rowCount ≤ ↑(Classical.choose hP) に書き換える
-
   -- まず ∃ の形をした補題として取り直す
   have hP_ex :
     ∃ i : Fin m,
@@ -1968,22 +2614,18 @@ lemma findPivot_spec_some_sound
       (st.rowCount : Nat) ≤ Nat.find hHex ∧
       (matOf st.R) i ⟨st.colPtr, hcol⟩ ≠ 0 :=
     hP  -- ← PivotIndexPred の定義そのもの
-
   -- choose_spec を使って性質を取り出す
   have h_spec :
     ((Classical.choose hP : Fin m) : Nat) = Nat.find hHex ∧
     (st.rowCount : Nat) ≤ Nat.find hHex ∧
     (matOf st.R) (Classical.choose hP) ⟨st.colPtr, hcol⟩ ≠ 0 :=
     Classical.choose_spec hP_ex
-
   rcases h_spec with ⟨h_eq, h_ge, h_nz⟩
-
   -- rowCount ≤ (Classical.choose hP).val へ書き換え
   have h_ge_choose :
     (st.rowCount : Nat) ≤ ((Classical.choose hP : Fin m) : Nat) := by
     rw [h_eq]
     exact h_ge
-
   -- (i0 : Nat) = Nat.find hHex を得る
   have hi0_nat_eq :
     (i0 : Nat) = Nat.find hHex := by
@@ -1996,27 +2638,23 @@ lemma findPivot_spec_some_sound
       (i0 : Nat)
           = ((Classical.choose hP : Fin m) : Nat) := this
       _   = Nat.find hHex := h_val_eq
-
   have h_ge' :
     (st.rowCount : Nat) ≤ (i0 : Nat) := by
     rw [hi0_nat_eq]
     exact h_ge
-
   have hP_spec :
     (st.rowCount : Nat) ≤ (i0 : Nat) ∧
     (matOf st.R) i0 ⟨st.colPtr, hcol⟩ ≠ 0 := by
     rw [hi0] at h_nz
     exact ⟨h_ge', h_nz⟩
-
   -- これを i0 についての主張に書き換え
   have hP_spec_i0 :
     (st.rowCount : Nat) ≤ i0 ∧
     (matOf st.R) i0 ⟨st.colPtr, hcol⟩ ≠ 0 := by
     simpa [hi0] using hP_spec
-
   exact hP_spec_i0
 
-
+/-  -/
 lemma findPivot_spec_some_min
   {m n K} [Field K]
   {st : GEStateP m n K} {i0 : Fin m}
@@ -2030,7 +2668,6 @@ lemma findPivot_spec_some_min
   classical
   -- spec の内部で使っている述語
   let Hex : Prop := ∃ r : Nat, PivotIndexPred st hcol r
-
   -- まず Hex が真であることを示す
   have hHex : Hex := by
     by_contra hFalse
@@ -2040,13 +2677,11 @@ lemma findPivot_spec_some_min
       simp [Hex, hFalse]
     -- でも今は some i0 だと仮定しているので矛盾
     have : some i0 = none := by simp [h] at hnone
-    exact Option.noConfusion this
-
+    simp at this
   -- 以降 Nat.find hHex を使うので、外に出しておく
   -- （なくてもいいけど読みやすさのため）
   have hP : PivotIndexPred st hcol (Nat.find hHex) :=
     Nat.find_spec hHex
-
   -- h から、実際に返しているのが Classical.choose hP であることを引き出す
   have h' := h
   unfold findPivot_spec at h'
@@ -2054,12 +2689,10 @@ lemma findPivot_spec_some_min
   have h'' :
     some (Classical.choose hP) = some i0 := by
     simpa [Hex, hHex, hP] using h'
-
   -- some の injectivity から中身の Fin m が等しい
   have hi0 :
     Classical.choose hP = i0 :=
     Option.some.inj h''
-
   -- PivotIndexPred st hcol (Nat.find hHex) を「∃i : Fin m, …」の形で取り出す
   -- ここで hP : PivotIndexPred st hcol (Nat.find hHex)
   --     = ∃ i : Fin m, (i : Nat) = Nat.find hHex ∧ … なので、
@@ -2067,7 +2700,6 @@ lemma findPivot_spec_some_min
   rcases Classical.choose_spec hP with
     ⟨h_val_eq, h_ge, h_nz⟩
   -- h_val_eq : ((Classical.choose hP : Fin m) : Nat) = Nat.find hHex
-
   -- hi0 : Classical.choose hP = i0 から、Nat 値の等しさを得る
   have h_val_eq' :
     (i0 : Nat) = Nat.find hHex := by
@@ -2079,22 +2711,17 @@ lemma findPivot_spec_some_min
       (i0 : Nat)
           = ((Classical.choose hP : Fin m) : Nat) := this.symm
       _   = Nat.find hHex := h_val_eq
-
   -- 求める形にまとめる（向きに注意：i0.val = Nat.find hHex）
   constructor
   · -- 最小性のうち、PivotIndexPred st hcol i0.val
     simp [h_val_eq', hP]
   · -- 最小性のうち、∀ r < i0.val, ¬
     intro r hr_ge hr_lt hP_r
-
     have hr_lt' : r < Nat.find hHex := by
       rw [h_val_eq'] at hr_lt
       exact hr_lt
-
     have h_le : Nat.find hHex ≤ r := Nat.find_min' hHex hP_r
-
     have : Nat.find hHex < Nat.find hHex := Nat.lt_of_le_of_lt h_le hr_lt'
-
     exact (lt_irrefl _ this).elim
 
 lemma findPivot_spec_eq_some_iff
@@ -2535,7 +3162,6 @@ lemma findPivot_loop_some_sound
   (matOf stP.R) i0 ⟨stP.colPtr, hcol⟩ ≠ 0 := by
   classical
   let mSz := stP.R.A.size
-
   -- 「残り行数 d = mSz - k」で再帰
   have aux :
     ∀ d k,
@@ -2576,7 +3202,6 @@ lemma findPivot_loop_some_sound
           -- rowCount ≤ k かどうか
           by_cases hrow : stP.rowCount ≤ k
           · simp [hrow] at hfk
-
             by_cases hz : (stP.R.A[k][stP.colPtr]'(
               by
               have : stP.R.A[k].size = n := by
@@ -2591,15 +3216,11 @@ lemma findPivot_loop_some_sound
             · -- 2. a = 0 の場合
               have hfk' := hfk
               simp [hz] at hfk'  -- ⇒ hfk' : findPivot_loop ... (k+1) = some i0
-
               -- k+1 に対して IH を使う準備（mSz - (k+1) = d を hk から出す）
-
-
               -- IH を (k+1) に適用
               exact IH (k+1) hk1 hfk'
             · -- 1. a ≠ 0 の場合
               simp [hz] at hfk
-
               -- hfk : some i0 = some ⟨k, _⟩ なので i0 = ⟨k, _⟩ を取り出す
               have hi0_eq : i0 = ⟨k,by
                 have : k = i0.val := by simp [hfk.symm]
@@ -2640,7 +3261,6 @@ lemma findPivot_loop_some_sound
                 apply hz
                 simp [hi0_eq] at hzero
                 exact hzero
-
               exact ⟨h_rowCount_le_i0, h_matOf_nz⟩
           · -- hrow が偽（rowCount ≤ k が成り立たない）なら、
             -- この step では「そのまま findPivot_loop ... (k+1)」を呼んでいるので、
@@ -2651,18 +3271,16 @@ lemma findPivot_loop_some_sound
             have hk_lt_row_neg : ¬ (stP.rowCount ≤ k) := by exact Nat.not_le_of_lt hk_lt_row
             simp [hrow] at hfk
             exact IH (k+1) hk1 hfk
-
         · -- hi が成り立たない (¬ k < mSz) なら、この step でも none で終わるはず。
           -- でも hfk は some i0 なので矛盾。
           simp [mSz, hi] at hfk
-
   -- 実際に使いたいのは k = 任意（特に rowCount）なので、
   -- d := mSz - k をとって aux を呼べばよい。
   have hk : mSz - k = mSz - k := rfl
   exact aux (mSz - k) k hk h
 
--- i = rowCount から始まるループが none を返すことと、
--- rowCount 以降で非零な行が存在しないことは同値
+/- i = rowCount から始まるループが none を返すことと、
+  rowCount 以降で非零な行が存在しないことは同値 -/
 lemma findPivot_loop_none_iff'
   {m n K} [Field K] [DecidableEq K]
   (stP : GEStateP m n K) (hcol : stP.colPtr < n) :
@@ -2677,7 +3295,7 @@ lemma findPivot_loop_none_iff'
       findPivot_loop_some_of_hasPivot stP hcol h_has
     -- しかし今は none と仮定しているので矛盾
     have : some i0 = none := by simp [h_none] at h_some
-    exact Option.noConfusion this
+    simp at this
   · -- ← : pivot が存在しないなら、ループは none
     intro h_no
     -- こちらは contrapositive を使う
@@ -2696,13 +3314,10 @@ lemma findPivot_loop_none_iff'
           (stP.rowCount : Nat) ≤ i0 ∧
           (matOf stP.R) i0 ⟨stP.colPtr, hcol⟩ ≠ 0 :=
           findPivot_loop_some_sound stP hcol (k := stP.rowCount) (i0 := i0) hopt
-
         rcases h_sound with ⟨h_ge, h_nz⟩
-
         -- HasPivotPred は「rowCount 以上で、その列が非零な行がある」
         have h_has : HasPivotPred stP hcol :=
           ⟨i0, h_ge, h_nz⟩
-
         -- これは ¬HasPivotPred と矛盾
         exact h_no h_has
 
@@ -3157,7 +3772,6 @@ lemma findPivot_loop_eq_some_iff
     exact h_loop
 
 
-
 lemma findPivot_loop_correct
   {m n K} [Field K] [DecidableEq K]
   (stP : GEStateP m n K)
@@ -3186,7 +3800,6 @@ lemma findPivot_loop_correct
         findPivot_loop stP.R stP.rowCount stP.colPtr hcol stP.rowCount = some i0 :=
         (findPivot_loop_eq_some_iff (stP := stP) (hcol := hcol) (i0 := i0)).2 hFirst
       simp [hExecSome]
-
 
 
 lemma findPivot_exec_eq_spec
@@ -3489,7 +4102,7 @@ lemma matOf_rSwap_row_right
 
   simp [hL, hRow, hR.symm]
 
--- 「swap でいじってない行はそのまま」
+/-「swap でいじってない行はそのまま」-/
 lemma matOf_rSwap_row_other
   {m n K} [Field K]
   (R : Rectified m n K)
@@ -3698,6 +4311,7 @@ lemma matOf_rSwap_eq_P_mul
           rhs
           simp [h_perm_other]
 
+/-  -/
 lemma inv_after_rSwap
   {m n K} [Field K] {st : GEStateP m n K} {i0 : Fin m}
   (hrow : st.rowCount ≤ i0)
@@ -4501,8 +5115,8 @@ lemma extendPivot_in
       -- st.inv.I1_in を使う
       have h := st.inv.I1_in ⟨i.val, h_i_lt⟩
       simpa using h
-    exact Nat.lt_succ_of_lt this
-
+    simp only at this
+    exact Nat.le_of_lt this
 
 lemma newPivotRow_left_zero
   {m n K} [Field K]
@@ -4588,7 +5202,6 @@ lemma newPivotRow_left_zero
 
     -- これがちょうどゴール
     simpa [rowFin] using h_tail
-
 
 /- rAxpy は pivot 行そのものは変えない -/
 lemma matOf_rAxpy_pivot_row
@@ -5207,7 +5820,6 @@ lemma clearPivotCol_loop_row_unchanged_simple
   have : i + (m - i) = m := Nat.add_sub_of_le hiA
   exact main (m - i) i R this rfl
 
-/- clearPivotCol_loop の全ステップで pivot 行 `row` は不変 -/
 /- clearPivotCol_loop の全ステップで pivot 行 `row` は不変（Fin / `' 付き版） -/
 lemma clearPivotCol_loop_row_unchanged
   {m n K} [Field K]
@@ -7402,7 +8014,6 @@ lemma findPivot_spec_some_sound_new
   classical
   -- findPivot_spec の定義で使う命題
   let Hex : Prop := ∃ r : Nat, PivotIndexPred st hcol r
-
   -- Hex が偽だと findPivot_spec = none となり、仮定 h と矛盾するので Hex は真
   have hHex : Hex := by
     by_contra hFalse
@@ -7410,8 +8021,7 @@ lemma findPivot_spec_some_sound_new
       unfold findPivot_spec
       simp [Hex, hFalse]
     -- h : findPivot_spec st hcol = some i0 と矛盾
-    exact Option.noConfusion (Eq.trans h.symm hnone)
-
+    simp [h] at hnone
   -- h から「実際に返しているのは Classical.choose hP」であることを引き出す
   have h' := h
   unfold findPivot_spec at h'
@@ -7423,12 +8033,10 @@ lemma findPivot_spec_some_sound_new
     some (Classical.choose hP) = some i0 := by
     -- definitional equality で Nat.find_spec hHex = hP と見なせる
     simpa [Hex, hHex, hP] using h'
-
   -- some の injectivity から、中身が等しい
   have hi0 :
     Classical.choose hP = i0 :=
     Option.some.inj h''
-
   -- hP から Classical.choose hP に対する性質（rowCount 以上 & 非零）を取り出す
   have hP_spec :
     (st.rowCount : Nat) ≤ Classical.choose hP ∧
@@ -7442,7 +8050,6 @@ lemma findPivot_spec_some_sound_new
       rhs
       rw [← h_val_eq]
     exact ⟨h_ge, h_nz⟩
-
   -- これを i0 についての主張に書き換える
   have hP_spec_i0 :
     (st.rowCount : Nat) ≤ i0 ∧
@@ -7450,9 +8057,7 @@ lemma findPivot_spec_some_sound_new
     by
       rw [hi0] at hP_spec
       exact hP_spec
-
   exact hP_spec_i0
-
 
 -- doneExecP なら stepKernel は恒等変換
 lemma stepKernel_doneExecP_id
@@ -8298,24 +8903,18 @@ def check_independence
     (assignment : Fin P.n → Fin P.t → ZMod p) : Bool :=
   -- 1. 行列全体を評価
   let M_full := evalMatrix P p assignment
-
   -- 2. グラフ G に含まれる辺だけを抽出
   -- sortedAllEdges は決定論的なので、常に同じ順序になります
   let g_list := (sortedAllEdges P.n).filter (fun e => e ∈ G)
-
   -- 3. 部分行列の構築
   let m := g_list.length
-
   -- 部分行列: 列 j は g_list の j 番目の辺に対応
   let M_sub : Matrix (Fin (d_col P)) (Fin m) (ZMod p) :=
     fun i j => M_full i (g_list.get j)
-
   -- 4. ランク計算
   let r := computeRank M_sub
-
   -- 5. 判定: ランク == 辺数
   r == m
-
 
 -- [前提1] check.lean のガウス消去が正しいことの公理化
 -- geRunExec が、十分な燃料を与えれば正しいランク（行数）を返すと仮定します。
@@ -8770,35 +9369,28 @@ theorem check_independence_soundness
   -- 1. check_independence の定義を展開
   unfold check_independence at h_check
   dsimp at h_check
-
   -- 定義内で使われている変数を再現
   let M_val := evalMatrix P p assignment
   let g_list := (sortedAllEdges P.n).filter (fun e => e ∈ G)
   let m := g_list.length
   let M_sub := fun i j => M_val i (g_list.get j)
-
   -- 2. computeRank の結果が true (つまり列数 m と一致)
   have h_rank_val : computeRank M_sub = m := by
     -- r == m が true なので r = m
     simpa using h_check
-
-  -- 3. ガウス消去の正当性より、実際のランクも m
+  -- 3. ガウス消去の正当性より、実際のランクも
   have h_rank_eq_m : Matrix.rank M_sub = m := by
     rw [computeRank_eq_rank] at h_rank_val
     exact h_rank_val
-
   -- 4. 有限体上のランクから、多項式行列(有理数/整数)のランクへの持ち上げ
   -- 戦略:
   --   rank(M_sub) = m  (in ZMod p)
   --   rank(M_sub) ≤ rank(M_poly) (in Q) ?
-
   -- PolyOver の定義は整数係数多項式と見なせるため、ZMod p への評価は環準同型です。
   -- したがって、Matrix.rank_map_le が適用できます。
-
   -- St.indep の定義 (LM.ColsIndependentOn) は「列が線形独立」
   -- これは「列フルランクであること (rank = 列数)」と同値です。
   rw [St.indep, LM.ColsIndependentOn]
-
   -- 6. 「線形独立 ↔ ランクが列数と一致」を使ってゴールをランクの等式に変換
   -- Submodule.finrank_span_eq_card_iff_linearIndependent などもありますが、
   -- 行列特有の定理を使うのが楽です。
@@ -8817,24 +9409,18 @@ theorem check_independence_soundness
     (FractionRing (MvPolynomial (Var P) ℚ)) (Set.range (fun j : G => LM.colsFamily (St.M P) j)) =
     Submodule.span (FractionRing (MvPolynomial (Var P) ℚ)) (Set.range M_poly_sub.col) := by
     congr
-
   -- ゴールを書き換え
   rw [Set.finrank, h_span_eq]
-
   -- これで形が合ったので適用可能になる
   rw [← Matrix.rank_eq_finrank_span_cols M_poly_sub]
-
   -- これでゴールは Fintype.card G = M_poly_sub.rank になりました
   symm
   apply le_antisymm
-
   · -- 上限: ランクは列数 (card G) を超えない
     -- M_poly_sub の列添字は {x // x ∈ G} (Subtype) ですが、
     -- これを Fin (card G) に変換してもランクは変わりません。
     exact Matrix.rank_le_card_width M_poly_sub
-
   · -- 下限: 評価行列のランク (m) 以上である
-    -- まず card G = m であることを整理
     -- まず card G = m であることを整理
     have h_card : Fintype.card {e // e ∈ G} = m := by
       -- g_list = (sortedAllEdges P.n).filter (· ∈ G) です。
@@ -8842,22 +9428,16 @@ theorem check_independence_soundness
       -- 1. sortedAllEdges は重複がない (Nodup)
       -- 2. G の要素はすべて sortedAllEdges に含まれる (Cover)
       dsimp [m, g_list]
-
       -- 1. 左辺 Fintype.card {e // e ∈ G} を Finset.card G に変換
       rw [Fintype.card_coe]
-
       -- リストの重複がないことの証明 (厳密には strictUpperPairs の性質から導出)
       have h_nodup : (sortedAllEdges P.n).Nodup := sortedAllEdges_nodup P.n
-
       -- G の全要素がリストに含まれていることの証明
       have h_subset : G ⊆ (sortedAllEdges P.n).toFinset := by
         intro e he
         simp only [sortedAllEdges, List.mem_toFinset, List.mem_map]
-
-
         -- e ∈ G なので e はループではない
         have not_loop : ¬ e.IsDiag := h_simple e he
-
         -- e = {u, v} とすると u ≠ v
         let u := e.out.1
         let v := e.out.2
@@ -8868,7 +9448,6 @@ theorem check_independence_soundness
           rw [h_eq, Sym2.isDiag_iff_proj_eq]
           -- Sym2.out_eq e から e = {u, v} なので u=v なら eはループ
           exact h
-
         -- 4. 大小関係で場合分け (u < v または v < u)
         rcases lt_trichotomy u v with h_lt | h_eq_uv | h_gt
         · -- ケース u < v: (u, v) がリストにある
@@ -8879,10 +9458,8 @@ theorem check_independence_soundness
             exact h_lt
           · -- s(u, v) = e
             exact h_eq.symm
-
         · -- ケース u = v: 矛盾
           contradiction
-
         · -- ケース v < u: (v, u) がリストにある
           exists (v, u)
           constructor
@@ -8892,22 +9469,18 @@ theorem check_independence_soundness
           · -- s(v, u) = s(u, v) = e
             rw [Sym2.eq_swap]
             exact h_eq.symm
-
       -- 2. 右辺の List.length を Finset.card に変換
       -- 使う補題: List.Nodup.length_eq_card {l} (h : l.Nodup) : l.length = l.toFinset.card
       -- フィルタリングされたリストも Nodup であるため、この補題が使えます
       rw [← List.toFinset_card_of_nodup (List.Nodup.filter _ h_nodup)]
-
       -- 3. リストのフィルタと集合のフィルタの交換
       -- List.toFinset_filter : (l.filter p).toFinset = l.toFinset.filter p
       rw [List.toFinset_filter]
-
       -- 4. 集合の等式を示す
       -- G = (sortedAllEdges.toFinset).filter (· ∈ G)
       congr
       ext x
       simp only [Finset.mem_filter, List.mem_toFinset]
-
       constructor
       · -- x ∈ G → (x ∈ List ∧ x ∈ G)
         intro hx
@@ -8920,11 +9493,9 @@ theorem check_independence_soundness
         rintro ⟨_, hx⟩
         simp at hx
         exact hx
-
     -- 不等式の結合
     rw [h_card]
     rw [← h_rank_eq_m] -- m = rank(M_sub)
-
     -- M_sub (ZMod p) は M_poly_sub (Q) の評価形です。
     -- 評価してもランクは下がることしかないので、元のランクの方が大きい（または等しい）。
     -- rank(M_sub) ≤ rank(M_poly_sub)
@@ -8977,15 +9548,12 @@ def capacity_coning (base_capacity : ℕ) (t : ℕ) : ℕ :=
 def get_cnt_capacity (cnt_idx : ℕ) : ℕ :=
   let n := P.n
   let t := P.t
-
   match cnt_idx with
   | 1 => -- K_n (Generic Rigidity of Complete Graph)
     -- n*t - binomial(t+1, 2)  (for n >= t)
     if n < t then n * (n - 1) / 2
     else n * t - (t * (t + 1)) / 2
-
   | 2 => 0 -- K_n_bar (Empty)
-
   -- Coning Base (K_k + Empty)
   -- K_bar のランクは0。そこへ k 回 Coning する。
   -- c_t(K_1 + K_bar) = 0 + t
@@ -8996,14 +9564,12 @@ def get_cnt_capacity (cnt_idx : ℕ) : ℕ :=
   | 5 => t + (t - 1) + (t - 2) -- K3 + K_bar
   | 6 => t + (t - 1) + (t - 2) + (t - 3) -- K4 + K_bar
   | 7 => t + (t - 1) + (t - 2) + (t - 3) + (t - 4) -- K5 + K_bar
-
   -- Disjoint Union with Isolated vertices (K_{a,b} U K_bar)
   -- 孤立点はランクに寄与しないので、K_{a,b} のランクそのもの
   | 8  => capacity_Kab 3 5 t -- K3,5
   | 9  => capacity_Kab 4 4 t -- K4,4
   | 10 => capacity_Kab 4 5 t -- K4,5
   | 11 => capacity_Kab 5 5 t -- K5,5
-
   -- Coning + K_{a,b}
   -- c_t(K_1 + K_{a,b}) = c_{t-1}(K_{a,b}) + t
   | 12 => -- K1 + K3,4
@@ -9016,9 +9582,11 @@ def get_cnt_capacity (cnt_idx : ℕ) : ℕ :=
     let cap_base := capacity_Kab 3 3 (t - 2)
     let cap_step1 := capacity_coning cap_base (t - 1)
     capacity_coning cap_step1 t
-
   | _ => 0 -- Undefined
 
+
+/- TODO : もっと速く c_t を計算できる関数を用意する。そして、その関数が返す値と C_{n,6} における重み関数の値が一致することを証明する
+  そこで、C_{n,5}, C_{n,6} まで用意しておく。-/
 
 /- ========================================================================
   2. Graph Generation Logic
@@ -9051,20 +9619,15 @@ def verify_core_properties
     (C : Graph P) -- サーキット候補
     (cnt_idx : ℕ) -- 主張するクラスID
     : Bool :=
-
   -- 1. IDに基づいて「正解」となる F と capacity を導出
   let F := get_Cnt_graph_from_index P cnt_idx
   let capacity := get_cnt_capacity P cnt_idx
-
   -- 2. C ⊆ G チェック
   let is_subset_G := C ⊆ G
-
   -- 3. C ⊆ F チェック
   let is_subset_F := C ⊆ F
-
   -- 4. ランク違反チェック (|C| > c_t(F))
   let is_rank_violation := C.card > capacity
-
   is_subset_G && is_subset_F && is_rank_violation
 
 
@@ -9093,12 +9656,12 @@ def verify_phase3_combinatorial
     (G : Graph P)
     (C_indices : List ℕ)
     (cnt_idx : ℕ) : Bool :=
-
   -- 準備: インデックスからサーキット候補 C を復元
   let C := indices_to_graph P C_indices
-
   -- 検証: Core関数に委譲 (F と capacity は Core 内部で決定される)
   verify_core_properties P G C cnt_idx
+
+/- TODO: C ⊆ F かつ |E(C)| > c_t(F) を確かめれば（つまり検証関数をかませば） G が C_t - dependent であることを証明 -/
 
 end VerifyCircuit
 
@@ -9574,196 +10137,3 @@ def verify_Cnt_class (F : Graph P) : Bool :=
   verify_Cnt_membership_rec_edges P P.n P.n P.t F_edges
 
 end Counterexample
-
-/-======================= ランク計算の実装（有限体版） =======================-/
-/- 𝔽p 上の厳密ガウス消去ランク（完全消去・行入替あり） -/
-variable {p : ℕ} [Fact p.Prime]
-local notation "𝔽p" => ZMod p
-
-namespace EquivGoal
-
-open St Cnt
-
-/-! ## サーキット存在（マトロイド一般論；Params 版）
-`G` が Sₜ-従属なら、`G` に含まれるサーキットが存在する。 -/
-/- If `G` is Sₜ-dependent, then there exists a circuit `C ⊆ G`. -/
-axiom circuit_exists_of_St_dep
-  (P : Params) (G : Finset (Ground P)) :
-  (¬ St.indep P G) → ∃ C : Finset (Ground P), C ⊆ G ∧ St.isCircuit P C
-
-/-! ## 補題4（PDF）Params 版（大域同値）
-(a) `∀ G, CtIndependent P G → St.indep P G`
-↔ (b) `∀ C, St.isCircuit P C → InCnt P (St.closure P C)` -/
-/- Lemma 4 (global, Params form). -/
-axiom Lemma4_global (P : Params) :
-  (∀ G : Finset (Ground P), Cnt.CtIndependent P G → St.indep P G) ↔
-  (∀ C : Finset (Ground P), St.isCircuit P C → Cnt.InCnt P (St.closure P C))
-
-/- 対偶： (b) を否定する回路が 1 つでもあれば、(a) の否定すなわち
-   `∃ G, CtIndependent P G ∧ ¬ St.indep P G` が成り立つ。 -/
-lemma lemma4_right_contrapositive (P : Params) :
-  (∃ C : Finset (Ground P), St.isCircuit P C ∧ ¬ Cnt.InCnt P (St.closure P C)) →
-  (∃ G : Finset (Ground P), Cnt.CtIndependent P G ∧ ¬ St.indep P G) := by
-  classical
-  intro hex
-  -- 「(b) が ∀C… 成立しない」ことを作る
-  have hnotB :
-      ¬ (∀ C : Finset (Ground P), St.isCircuit P C → Cnt.InCnt P (St.closure P C)) := by
-    rcases hex with ⟨C, hC, hnot⟩
-    intro hforall; exact hnot (hforall C hC)
-  -- 同値から (a) も成立しない
-  have hnotA :
-      ¬ (∀ G : Finset (Ground P), Cnt.CtIndependent P G → St.indep P G) :=
-    (mt (Lemma4_global P).mp) hnotB
-  -- ∃G … を取り出す
-  simpa [not_forall] using hnotA
-
-end EquivGoal
-
-
-
-/-! ## アルゴリズム（Bool）の仕様と正しさ（型）
-
-  check G の実装は AppendixB 名前空間側にあり、ここでは結果との同値を固定。
--/
-
-namespace AppendixB
-
-open St Cnt EquivGoal
-
-/- True 側仕様は維持（St-dep かつ 「G 内の回路 C」で cl(C) ∉ 𝒞） -/
-def check_spec_true (P : Params) (G : Finset (Ground P)) : Prop :=
-  Cnt.StDependent P G ∧
-  ∃ C : Finset (Ground P), C ⊆ G ∧ St.isCircuit P C ∧ ¬ Cnt.InCnt P (St.closure P C)
-
-/- False 側仕様は「その G が反例でない」に一本化 -/
-def check_spec_false (P : Params) (G : Finset (Ground P)) : Prop :=
-  ¬ Cnt.Counterexample P G
-
-/- Appendix B の反例判定器（骨格実装；Params 版）。
-   1) S_t-independent なら `false`
-   2) そうでなく回路 C を見つけ、cl(C) ∈ 𝒞_{n,t} なら `false`
-   3) cl(C) ∉ 𝒞_{n,t} なら `true`
-   ※ findCircuit P G = none の場合は保守的に `false`。 -/
-/- 実行時に追跡したい中間情報。 -/
-structure CheckTrace (P : Params) where
-  rank : ℕ                                    -- (2) G のランク
-  indep   : Bool                                 -- (2) 独立？（= rank = |G|）
-  circuit? : Option (Finset (Ground P))          -- (3) 見つかったサーキット
-  closure? : Option (Finset (Ground P))          -- (4) その閉包
-  inCnt?  : Option Bool                          -- (5) 閉包 ∈ 𝒞_{n,t}？
-  result  : Bool                                 -- 返却値（= check と同じ）
-
-/- 5 ステップをそのまま実行し、途中の値も返すトレース版。 -/
-noncomputable def runTrace (P : Params) (G : Finset (Ground P)) : CheckTrace P := by
-  admit
-  -- classical
-  -- -- (2) rank と独立判定
-  -- let r := Checker.rankQ_exact P G
-  -- let indep : Bool := decide (r = G.card)
-  -- -- (1),(2) で独立なら false を返す（回路も閉包も無し）
-  -- if h : indep = true then
-  --   exact {
-  --     rank    := r
-  --     indep   := indep
-  --     circuit? := none
-  --     closure? := none
-  --     inCnt?  := none
-  --     result  := false
-  --   }
-  -- else
-  --   -- (3) サーキット探索
-  --   match Checker.findCircuit P G with
-  --   | none =>
-  --       -- 従属のはずだが見つからなければ保守的に false
-  --       exact {
-  --         rank    := r
-  --         indep   := indep
-  --         circuit? := none
-  --         closure? := none
-  --         inCnt?  := none
-  --         result  := false
-  --       }
-  --   | some C =>
-  --       -- (4) 閉包計算（ここでは仕様版 `St.closure` に委譲）
-  --       let cl := St.closure P C
-  --       -- (5) 閉包が 𝒞_{n,t} に入るか？
-  --       if hcl : Cnt.InCnt P cl then
-  --         exact {
-  --           rank    := r
-  --           indep   := indep
-  --           circuit? := some C
-  --           closure? := some cl
-  --           inCnt?  := some true
-  --           result  := false
-  --         }
-  --       else
-  --         exact {
-  --           rank    := r
-  --           indep   := indep
-  --           circuit? := some C
-  --           closure? := some cl
-  --           inCnt?  := some false
-  --           result  := true
-  --         }
-
-/- 既存の Bool 版 `check` と同じ判定だけ欲しい人向けの薄いラッパ。 -/
-noncomputable def check (P : Params) (G : Finset (Ground P)) : Bool :=
-  (runTrace P G).result
-
-/- 実装後に満たすべき仕様（axiom; 骨格） -/
--- TODO: 将来証明する
-axiom check_true_iff (P : Params) (G : Finset (Ground P)) :
-  check P G = true  ↔ check_spec_true  P G
--- TODO: 将来証明する
-axiom check_false_iff (P : Params) (G : Finset (Ground P)) :
-  check P G = false ↔ check_spec_false P G
-
-end AppendixB
-
-
-namespace AppendixBCorrectness
-open Cnt St AppendixB EquivGoal
-
-/-! sound（True側）：check P G = true → 反例が「存在する」 -/
-theorem sound (P : Params) (G : Finset (Ground P)) :
-  check P G = true → ExistsCounterexample P := by
-  intro h
-  -- 仕様を展開
-  have hspec : check_spec_true P G := (check_true_iff P G).1 h
-  rcases hspec with ⟨hdep, ⟨C, hCsub, hC, hnot⟩⟩
-  -- 「cl(C) ∉ 𝒞_{n,t}」なる回路が Ground(P) 上に存在 ⇒ 補題4の対偶（大域）で反例が存在
-  have hx : ∃ C, St.isCircuit P C ∧ ¬ Cnt.InCnt P (St.closure P C) := ⟨C, hC, hnot⟩
-  exact lemma4_right_contrapositive P hx
-
-/-! complete（False側）：check P G = false → その G は反例ではない -/
-theorem complete (P : Params) (G : Finset (Ground P)) :
-  check P G = false → ¬ Counterexample P G := by
-  intro h
-  -- 仕様そのもの
-  have hspec : check_spec_false P G := (check_false_iff P G).1 h
-  exact hspec
-
-/- True 側：check が true なら「どこかに」反例が存在する。 -/
-theorem check_true_implies_exists_counterexample
-  (P : Params) (G : Finset (Ground P)) :
-  check P G = true → ExistsCounterexample P :=
-  sound P G
-
-/- 逆向き：もし G 自身が反例なら，チェックは必ず true を返す。 -/
-theorem counterexample_implies_check_true
-  (P : Params) (G : Finset (Ground P)) :
-  Counterexample P G → check P G = true := by
-  intro hCE
-  -- False なら「反例ではない」に反するので，False は起こりえない
-  have hnotfalse : ¬ check P G = false := by
-    intro hf
-    exact (complete P G hf) hCE
-  -- Bool の二値性で結論
-  by_cases hc : check P G = true
-  · exact hc
-  · -- 2値なので false しかないが，それは上の hnotfalse と矛盾
-    cases hcb : check P G <;> simp [hcb] at *
-
-
-end AppendixBCorrectness

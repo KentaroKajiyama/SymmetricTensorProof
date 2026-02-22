@@ -314,4 +314,133 @@ lean_obj_res cpp_dump_graph6(lean_obj_arg n_obj, lean_obj_arg path_obj, b_lean_o
     return lean_io_result_mk_ok(lean_box(0));
 }
 
+// FFI 4: Dependent バイナリ (.dat) の読み込み
+// 引数から n_obj を削除しました
+lean_obj_res cpp_load_dependent_bin(lean_obj_arg path_obj, lean_obj_arg world) {
+    const char* path = lean_string_cstr(path_obj);
+
+    std::ifstream infile(path, std::ios::binary);
+    if (!infile.is_open()) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Could not open binary file")));
+    }
+
+    // 構造体に f_indices と sigma を追加
+    struct Record {
+        size_t n;
+        std::string g6;
+        uint32_t class_index;
+        std::vector<int64_t> c_indices;
+        std::vector<int64_t> f_indices;
+        std::vector<int64_t> sigma;
+    };
+    std::vector<Record> records;
+
+    while (infile.peek() != EOF) {
+        uint8_t type_id;
+        if (!infile.read((char*)&type_id, 1)) break;
+        if (type_id != 1) break; // Dependent 以外で終了
+
+        uint64_t seed;
+        infile.read((char*)&seed, 8);
+
+        // g6
+        int16_t g6_len;
+        infile.read((char*)&g6_len, 2);
+        std::string g6(g6_len, '\0');
+        infile.read(&g6[0], g6_len);
+
+        // class_index
+        int32_t class_index;
+        infile.read((char*)&class_index, 4);
+
+        // c_indices (回路の辺)
+        int16_t vec_len;
+        infile.read((char*)&vec_len, 2);
+        std::vector<int64_t> c_indices(vec_len);
+        infile.read((char*)c_indices.data(), vec_len * 8);
+
+        // ★ f_indices (閉包の辺) を読み込む
+        int16_t f_len;
+        infile.read((char*)&f_len, 2);
+        std::vector<int64_t> f_indices(f_len);
+        infile.read((char*)f_indices.data(), f_len * 8);
+
+        // ★ sigma (頂点の標準形への置換写像) を読み込む
+        int16_t sigma_len;
+        infile.read((char*)&sigma_len, 2);
+        std::vector<int64_t> sigma(sigma_len);
+        infile.read((char*)sigma.data(), sigma_len * 8);
+
+        // Graph6 文字列の先頭文字から頂点数 n をデコードする
+        size_t n = 0;
+        if (g6_len > 0) {
+            n = (size_t)(g6[0] - 63);
+        }
+
+        records.push_back({n, g6, (uint32_t)class_index, c_indices, f_indices, sigma});
+    }
+    infile.close();
+
+    lean_object* result_arr = lean_alloc_array(records.size(), records.size());
+
+    for (size_t i = 0; i < records.size(); ++i) {
+        size_t n = records[i].n;
+        size_t n_sq = n * n;
+        int m = SETWORDSNEEDED(n); 
+        std::vector<graph> g_buf(m * n);
+
+        // 1. グラフGの ByteArray
+        lean_object* ba_obj = lean_alloc_sarray(1, n_sq, n_sq);
+        uint8_t* ptr = lean_sarray_cptr(ba_obj);
+        
+        std::string mutable_line = records[i].g6;
+        stringtograph(&mutable_line[0], g_buf.data(), m);
+        std::fill(ptr, ptr + n_sq, 0);
+        for (int u = 0; u < n; u++) {
+            for (int v = u + 1; v < n; v++) {
+                if (ISELEMENT(GRAPHROW(g_buf.data(), u, m), v)) { 
+                    ptr[u * n + v] = 1;
+                    ptr[v * n + u] = 1;
+                }
+            }
+        }
+
+        // 2. C_indices を Lean の Array Nat に変換 (1-based -> 0-based)
+        const auto& c_vec = records[i].c_indices;
+        lean_object* c_arr_obj = lean_alloc_array(c_vec.size(), c_vec.size());
+        for (size_t j = 0; j < c_vec.size(); j++) {
+            lean_array_set_core(c_arr_obj, j, lean_box(c_vec[j] - 1));
+        }
+
+        // ★ 3. F_indices を Lean の Array Nat に変換 (1-based -> 0-based)
+        const auto& f_vec = records[i].f_indices;
+        lean_object* f_arr_obj = lean_alloc_array(f_vec.size(), f_vec.size());
+        for (size_t j = 0; j < f_vec.size(); j++) {
+            lean_array_set_core(f_arr_obj, j, lean_box(f_vec[j] - 1));
+        }
+
+        // ★ 4. sigma を Lean の Array Nat に変換
+        // (※ Juliaの build_sigma の出力値は既に 0-based なので -1 は不要)
+        const auto& sigma_vec = records[i].sigma;
+        lean_object* sigma_arr_obj = lean_alloc_array(sigma_vec.size(), sigma_vec.size());
+        for (size_t j = 0; j < sigma_vec.size(); j++) {
+            lean_array_set_core(sigma_arr_obj, j, lean_box(sigma_vec[j]));
+        }
+
+        // ★ 5. Tuple (タグ0, 要素6) の作成に変更
+        // DependentRecord のフィールド定義順 (n, adjBytes, classIdx, cIndices, fIndices, sigma) に合わせる
+        lean_object* tuple = lean_alloc_ctor(0, 6, 0);
+        lean_ctor_set(tuple, 0, lean_box(n));
+        lean_ctor_set(tuple, 1, ba_obj);
+        lean_ctor_set(tuple, 2, lean_box(records[i].class_index));
+        lean_ctor_set(tuple, 3, c_arr_obj);
+        lean_ctor_set(tuple, 4, f_arr_obj);       // F の辺
+        lean_ctor_set(tuple, 5, sigma_arr_obj);   // 置換情報
+
+        lean_array_set_core(result_arr, i, tuple);
+    }
+
+    return lean_io_result_mk_ok(result_arr);
+}
+
 } // End extern "C"

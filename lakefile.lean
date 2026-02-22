@@ -9,7 +9,11 @@ package SymmetricTensorProof where
     ⟨`weak.linter.mathlibStandardSet, true⟩,
     ⟨`maxSynthPendingDepth, (3 : Nat)⟩
   ]
-  moreLeancArgs := #["-O3"]
+  moreLeancArgs := #[
+    "-O3", "-D_WIN32", "-DWIN32",
+    "-DAVOID_SYS_WAIT_H", "-DHAVE_WAIT_H=0",
+    "-I./native"
+  ]
 
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4.git"
@@ -18,22 +22,62 @@ require mathlib from git
 lean_lib «SymmetricTensorProof» where
 
 ---------------------------------------------------------------------
--- 1. リンク設定: ライブラリの絶対パスを直接指定
+-- 1. 共通パス設定 (MSYS2 UCRT64)
 ---------------------------------------------------------------------
+def msysRoot := "C:/msys64/ucrt64"
+def sysLibPath := s!"{msysRoot}/lib"
+def gccVersion := "13.2.0"
+def gccLibPath := s!"{msysRoot}/lib/gcc/x86_64-w64-mingw32/{gccVersion}"
+
+-- コンパイル用のヘッダーパス
+def cxxIncludePath1 := s!"{msysRoot}/include/c++/{gccVersion}"
+def cxxIncludePath2 := s!"{msysRoot}/include/c++/{gccVersion}/x86_64-w64-mingw32"
+
+---------------------------------------------------------------------
+-- 2. リンク設定 (重複許可 & 強制リンク)
+---------------------------------------------------------------------
+def commonLinkArgs : Array String :=
+  #[
+    "-static",
+
+    -- 【重要】重複定義エラーを無視するフラグ
+    -- libc++.a と libstdc++.a が衝突しても、先に見つかった方を使って続行させます
+    "-Wl,--allow-multiple-definition",
+
+    "-Wl,--start-group",
+
+    -- MSYS2 ライブラリ群
+    s!"{sysLibPath}/libmingw32.a",
+    s!"{sysLibPath}/libstdc++.a",
+    s!"{gccLibPath}/libgcc.a",
+    s!"{gccLibPath}/libgcc_eh.a",
+    s!"{sysLibPath}/libmoldname.a",
+    s!"{sysLibPath}/libmingwex.a",
+    s!"{sysLibPath}/libucrt.a",
+
+    "-Wl,--end-group",
+
+    -- Windows システム DLL
+    "-lmsvcrt", "-lkernel32", "-luser32", "-ladvapi32", "-lshell32"
+  ]
+
 lean_exe «graph-enum-claim5» where
   root := `SymmetricTensorProof.GraphEnum.Main
   exeName := "graph-enum-claim5"
-  moreLinkArgs := #[
-    -- システムの libstdc++ を直接フルパスで指定 (これが一番確実です)
-    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
-    -- glibcの互換性用
-    "-Wl,--defsym=__libc_csu_init=0",
-    "-Wl,--defsym=__libc_csu_fini=0",
-    "-lm"
-  ]
+  moreLinkArgs := commonLinkArgs
+
+lean_exe «graph-enum-test» where
+  root := `SymmetricTensorProof.GraphEnum.Test
+  exeName := "graph-enum-test"
+  moreLinkArgs := commonLinkArgs
+
+lean_exe «graph-dependent-verification» where
+  root := `SymmetricTensorProof.Verification.Dependent
+  exeName := "graph-dependent-verification"
+  moreLinkArgs := commonLinkArgs
 
 ---------------------------------------------------------------------
--- 2. C++ (Nauty) コンパイル設定
+-- 3. C++ (Nauty) コンパイル設定
 ---------------------------------------------------------------------
 
 def nautySrcs : Array String := #[
@@ -50,14 +94,16 @@ target glue.o pkg : System.FilePath := do
   let weakArgs := #[
     "-I", (pkg.dir / "native").toString,
     "-I", leanIncludeDir.toString,
-    "-fPIC"
+    "-I", cxxIncludePath1,
+    "-I", cxxIncludePath2
   ]
 
+  -- GCCでコンパイル
   let traceArgs := #[
-    "-O3",
-    "-std=c++14"
+    "-D_WIN32", "-O3", "-std=c++14",
+    "-Wno-unused-command-line-argument"
   ]
-  -- エラーが出たパス計算を避け、標準の "c++" コマンドを使用
+
   buildO oFile srcJob weakArgs traceArgs "c++"
 
 extern_lib liblean_glue pkg := do
@@ -66,14 +112,18 @@ extern_lib liblean_glue pkg := do
   let srcDir := pkg.dir / "native"
   let mut nautyJobs : Array (Job System.FilePath) := #[]
 
-  let nautyTraceArgs := #["-O3", "-DMAXN=0", "-fPIC"]
+  let nautyTraceArgs := #[
+    "-D_WIN32", "-O3", "-DMAXN=64", "-Dflockfile=_lock_file",
+    "-Dfunlockfile=_unlock_file", "-Dgetc_unlocked=_getc_nolock",
+    "-Dputc_unlocked=_putc_nolock"
+  ]
   let nautyWeakArgs := #["-I", srcDir.toString]
 
   for src in nautySrcs do
     let oFile := buildDir / (src ++ ".o")
     let srcFile := srcDir / src
     let srcJob ← inputFile srcFile false
-    let job ← buildO oFile srcJob nautyWeakArgs nautyTraceArgs "cc"
+    let job ← buildO oFile srcJob nautyWeakArgs nautyTraceArgs "clang"
     nautyJobs := nautyJobs.push job
 
   let libFile := pkg.buildDir / "lib" / "liblean_glue.a"
