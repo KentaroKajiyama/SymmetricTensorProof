@@ -422,7 +422,7 @@ lemma step_reverse_lemma
     · intro h; exact ⟨h, G.ne_of_adj h.1⟩
   -- Check size
   have h_edge_removed : s(v_target, u) ∈ G.edgeFinset := by
-    simp; exact h_u_neighbor
+    simp only [Set.mem_toFinset, mem_edgeSet]; exact h_u_neighbor
   have h_card_prev : G_prev.edgeFinset.card = k_edges := by
     have h_fin : G_prev.edgeFinset = G.edgeFinset.erase s(v_target, u) := by
       dsimp [G_prev]
@@ -456,7 +456,7 @@ lemma step_reverse_lemma
     simp
   -- Check MaxDegree4 (removing edge doesn't increase degree)
   have h_prev_sub : ∀ x, G_prev.neighborFinset x ⊆ G.neighborFinset x := by
-    intro x; intro y; simp [SimpleGraph.mem_neighborFinset]; rw [h_G_prev_adj]; tauto
+    intro x; intro y; simp only [SimpleGraph.mem_neighborFinset]; rw [h_G_prev_adj]; tauto
   have h_max_prev : MaxDegree4 G_prev := by
     intro v
     convert le_trans (Finset.card_le_card (h_prev_sub v)) (h_max v)
@@ -479,7 +479,8 @@ lemma step_reverse_lemma
         · case inr h => rcases h with ⟨heq, rfl⟩; rw [heq] at *;
     rw [h_set_eq]
     rw [Finset.card_sdiff]
-    have h_sub : {u} ⊆ G.neighborFinset v_target := by simp; exact h_u_neighbor
+    have h_sub : {u} ⊆ G.neighborFinset v_target := by
+      simp only [Finset.singleton_subset_iff, mem_neighborFinset]; exact h_u_neighbor
     rw [Finset.inter_eq_left.mpr h_sub]
     rw [h_deg, Finset.card_singleton]
     omega
@@ -606,8 +607,9 @@ lemma lemma_candidate_edges
             · simp
         rw [h_neighbors] at h_bound
         rw [Finset.card_union_of_disjoint] at h_bound
-        · simp at h_bound
-          simp
+        · simp only [card_neighborFinset_eq_degree,
+            Finset.card_singleton, Order.add_one_le_iff] at h_bound
+          simp only [card_neighborFinset_eq_degree, ge_iff_le]
           exact Nat.le_of_lt_succ h_bound
         · rw [Finset.disjoint_singleton_right, SimpleGraph.mem_neighborFinset]
           exact fun h => h_not_adj (G.adj_symm h)
@@ -680,8 +682,9 @@ lemma lemma_candidate_edges
                 · simp
             rw [h_neighbors] at h_bound
             rw [Finset.card_union_of_disjoint] at h_bound
-            · simp at h_bound
-              simp
+            · simp only [card_neighborFinset_eq_degree,
+                Finset.card_singleton, Order.add_one_le_iff] at h_bound
+              simp only [card_neighborFinset_eq_degree, ge_iff_le]
               exact Nat.le_of_lt_succ h_bound
             · rw [Finset.disjoint_singleton_right, SimpleGraph.mem_neighborFinset]
               exact fun h => h_not_adj (G.adj_symm h)
@@ -781,7 +784,7 @@ theorem step_completeness
   obtain ⟨G_gen, h_gen_mem, ⟨iso_gen⟩⟩
     := lemma_candidate_edges G_S v1 forbidden anchors G_S_next h_G_S_next_cond h_anchors_cond
   have h_trans : G_gen ∈ transition S v1 forbidden := by
-    simp [transition]
+    simp only [transition, List.mem_flatMap]
     exact ⟨G_S, h_S, h_gen_mem⟩
   -- reduce_iso guarantees existence of a representative in the reduced list
   rcases reduce_iso_soundness
@@ -1335,10 +1338,14 @@ theorem Gamma_4_4_is_complete
             · exists u
       )
       (by intros a ha; simp [anchors] at ha; simp; tauto) h_v3_in
-        (by intros x hx; simp [anchors] at hx; rcases hx with rfl | rfl | rfl; exact h_v1_in; exact h_v2_in; exact h_v4_in)
+        (by
+          intros x hx; simp [anchors] at hx;
+          rcases hx with rfl | rfl | rfl;
+          exact h_v1_in; exact h_v2_in; exact h_v4_in)
     let S3_4 := reduce_iso (transition S3_3 v3 [v1, v2, v4]) anchors
     have h3_4 : complete_anchored_enumeration S3_4 (Gamma_3_Step 4 v1 v2 v3 v4) anchors :=
-      step_completeness S3_3 (Gamma_3_Step 3 v1 v2 v3 v4) (Gamma_3_Step 4 v1 v2 v3 v4) v3 [v1, v2, v4] anchors h3_3
+      step_completeness S3_3
+        (Gamma_3_Step 3 v1 v2 v3 v4) (Gamma_3_Step 4 v1 v2 v3 v4) v3 [v1, v2, v4] anchors h3_3
       (by
         intro G hG; rcases hG with ⟨h_card, h_max, h_d1, h_d2, h_d3, h_adj, h_ne⟩
         have h_symm := fun (x y : V) (h : ¬G.Adj x y) (h_adj : G.Adj y x) => h (G.symm h_adj)
